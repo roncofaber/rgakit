@@ -20,9 +20,7 @@ from X-ray irradiated perovskite thin films.
 ## Install
 
 ```bash
-pip install -e .
-# Optional: plotly for HTML reports
-pip install plotly
+pip install rgakit
 ```
 
 ## Quick start
@@ -87,14 +85,3 @@ rgakit/
   report.py       — interactive HTML report generation
 ```
 
-## matchms comparison
-
-rgakit uses **NNLS** for quantitative spectral decomposition — it returns how
-much of each compound is present, not just which compound matches best.
-[matchms](https://github.com/matchms/matchms) uses cosine scoring optimised
-for LC-MS/MS (neutral losses, precursor matching) and is better suited for
-metabolite identification from tandem spectra. For low-resolution EI-RGA data,
-NNLS decomposition gives richer quantitative information.
-
-rgakit borrows the cosine similarity concept from matchms as a pre-screening
-step (`SpectraLibrary.search()`).

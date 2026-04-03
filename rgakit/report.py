@@ -321,7 +321,7 @@ def generate_report(
          hover-to-highlight, click-to-isolate legend, log-scale toggle,
          legend filter, and CSV download (requires *library*)
 
-    Requires plotly: ``pip install plotly`` (or ``pip install rgakit[report]``).
+    Requires plotly (included in the standard rgakit install).
 
     Parameters
     ----------
@@ -343,11 +343,7 @@ def generate_report(
         import plotly.graph_objects as go
         from plotly.offline import get_plotlyjs
     except ImportError:
-        raise ImportError(
-            "plotly is required for HTML reports:\n"
-            "  pip install plotly\n"
-            "  or: pip install 'rgakit[report]'"
-        )
+        raise ImportError("plotly is required: pip install rgakit")
 
     contribs = {k: v for k, v in result.contributions.items() if v >= threshold}
     total    = sum(contribs.values()) or 1.0

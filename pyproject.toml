@@ -17,11 +17,9 @@ dependencies = [
     "scipy>=1.7.0",
     "matplotlib>=3.5.0",
     "platformdirs>=2.5.0",
+    "plotly>=5.0.0",
+    "nistchempy",
 ]
-
-[project.optional-dependencies]
-nist    = ["nistchempy"]
-report  = ["plotly>=5.0.0"]
 
 [project.urls]
 Repository  = "https://github.com/roncofaber/rgakit"
