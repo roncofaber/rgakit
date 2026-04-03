@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rgakit"
+description = "RGA mass spectrum decomposition and library fitting"
+authors = [
+    {name = "roncofaber", email = "fabrice.roncoroni@gmail.com"}
+]
+license = "MIT"
+keywords = ["rga", "mass spectrometry", "fitting", "synchrotron", "NIST"]
+dynamic = ["version"]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.21.0",
+    "scipy>=1.7.0",
+    "matplotlib>=3.5.0",
+    "platformdirs>=2.5.0",
+]
+
+[project.optional-dependencies]
+nist    = ["nistchempy"]
+report  = ["plotly>=5.0.0"]
+
+[project.urls]
+Repository  = "https://github.com/roncofaber/rgakit"
+"Bug Tracker" = "https://github.com/roncofaber/rgakit/issues"
+Changelog   = "https://github.com/roncofaber/rgakit/releases"
+
+[tool.setuptools]
+packages = ["rgakit"]
+
+[tool.setuptools.dynamic]
+version = {attr = "rgakit.__version__"}
