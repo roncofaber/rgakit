@@ -10,6 +10,7 @@ authors = [
 ]
 license = "MIT"
 keywords = ["rga", "mass spectrometry", "fitting", "synchrotron", "NIST"]
+readme = "README.md"
 dynamic = ["version"]
 requires-python = ">=3.10"
 dependencies = [

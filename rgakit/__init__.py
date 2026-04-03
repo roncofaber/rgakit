@@ -9,7 +9,7 @@ from .report       import generate_report, plot_contributions, plot_stacked_spec
 from .nomenclature import normalize_nist_name, cactus_preferred_name, resolve_name
 from .similarity   import score, pairwise
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "MassSpectrum",
