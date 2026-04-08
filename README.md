@@ -76,12 +76,12 @@ ms.save_jdx("sample.jdx")
 
 ```
 rgakit/
-  spectrum.py     — MassSpectrum (JDX, MSP, txt I/O; compare; from_rga)
+  spectrum.py     — MassSpectrum (JDX, MSP, txt I/O; similarity_score / cosine_similarity; from_rga)
   library.py      — SpectraLibrary (NNLS fit, search, from_dir/from_msp)
   result.py       — FitResult (summary table, plot)
   similarity.py   — cosine / jaccard / pearson / entropy; pairwise matrix
-  background.py   — standalone linear background correction
   nomenclature.py — name resolution (common names → Cactus IUPAC → NIST)
   report.py       — interactive HTML report generation
+  background.py   — standalone linear background correction
 ```
 

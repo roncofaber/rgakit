@@ -6,12 +6,15 @@ MassSpectrum: a single compound's electron-ionisation mass spectrum.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
 import numpy as np
 
-from .nomenclature import cactus_preferred_name, normalize_nist_name, resolve_name
+from .nomenclature import normalize_nist_name, resolve_name, get_compound_info
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +151,8 @@ def _parse_msp_blocks(text: str) -> list[dict]:
                 metadata[internal_key] = _try_cast(val)
 
         if not mz_list:
+            block_name = metadata.get("name", "<unnamed>")
+            logger.warning("MSP block %r has no peaks - skipped.", block_name)
             continue
 
         mz        = np.array(mz_list, dtype=int)
@@ -232,9 +237,10 @@ class MassSpectrum:
     @classmethod
     def from_nist(
         cls,
-        name:      str | None       = None,
-        cas:       str | None       = None,
-        ms_index:  int              = 0,
+        name:      str | None        = None,
+        cas:       str | None        = None,
+        smiles:    str | None        = None,
+        ms_index:  int               = 0,
         local_dir: str | Path | None = None,
     ) -> "MassSpectrum":
         """
@@ -242,17 +248,17 @@ class MassSpectrum:
 
         Lookup order:
           1. User cache (``platformdirs.user_cache_dir('rgakit') / 'MS'``)
-          2. *local_dir* if provided (e.g. a bulk download folder) — file is
-             copied into the cache on first use.
+          2. *local_dir* if provided — file is copied into the cache on first use.
           3. NIST WebBook (fetched and saved to cache for future calls).
 
         Files are stored as ``{compound.ID}_MS_{ms_index}.jdx`` (NIST naming).
+        PubChem is queried once per compound to enrich metadata with SMILES.
 
         Parameters
         ----------
-        name, cas  : compound identifier (provide one)
-        ms_index   : which spectrum to use when multiple are available
-        local_dir  : optional extra source directory (e.g. ~/Downloads/MS)
+        name, cas, smiles : compound identifier (provide one)
+        ms_index          : which spectrum to use when multiple are available
+        local_dir         : optional extra source directory (e.g. ~/Downloads/MS)
         """
         try:
             import nistchempy as nist
@@ -261,15 +267,24 @@ class MassSpectrum:
         from platformdirs import user_cache_dir
         import shutil
 
+        # Resolve SMILES → CAS via PubChem before hitting NIST
+        if smiles is not None:
+            info = get_compound_info(smiles, "smiles")
+            if not info or not info.get("cas"):
+                raise ValueError(
+                    f"Could not resolve SMILES to a known compound: {smiles!r}"
+                )
+            cas = info["cas"]
+
         if name is not None:
             results = nist.run_search(name, "name")
         elif cas is not None:
             results = nist.run_search(cas, "cas")
         else:
-            raise ValueError("Provide either name or cas.")
+            raise ValueError("Provide name, cas, or smiles.")
 
         if not results.compounds:
-            raise ValueError(f"No compounds found for query: {name or cas!r}")
+            raise ValueError(f"No compounds found for query: {name or cas or smiles!r}")
 
         compound = results.compounds[0]
         filename = f"{compound.ID}_MS_{ms_index}.jdx"
@@ -278,41 +293,46 @@ class MassSpectrum:
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_path = cache_dir / filename
 
+        # Enrich with PubChem metadata (SMILES, InChIKey, etc.) — cached on disk
+        pubchem = get_compound_info(compound.cas_rn, "cas") if compound.cas_rn else {}
+
         metadata = {k: v for k, v in {
             "nist_id":   compound.ID,
             "cas":       compound.cas_rn,
-            "formula":   compound.formula,
-            "mw":        str(compound.mol_weight),
-            "inchi_key": getattr(compound, "inchi_key", None),
+            "formula":   pubchem.get("formula") or compound.formula,
+            "mw":        pubchem.get("mw") or str(compound.mol_weight),
+            "inchi_key": pubchem.get("inchikey") or getattr(compound, "inchi_key", None),
+            "smiles":    pubchem.get("smiles") or (smiles if smiles else None),
         }.items() if v}
 
-        # 1 — user cache hit
-        if cache_path.exists():
-            obj = cls.from_jdx_file(cache_path)
+        def _finalise(obj):
             obj.name = resolve_name(cas=compound.cas_rn, nist_name=compound.name)
             obj.metadata.update(metadata)
             return obj
 
-        # 2 — local_dir seed: copy into cache then load
+        # 1 — user cache hit
+        if cache_path.exists():
+            logger.debug("NIST cache hit: %s", cache_path.name)
+            return _finalise(cls.from_jdx_file(cache_path))
+
+        # 2 — local_dir seed
         if local_dir is not None:
             seed = Path(local_dir) / filename
             if seed.exists():
+                logger.debug("NIST local seed: copying %s to cache", seed.name)
                 shutil.copy2(seed, cache_path)
-                obj = cls.from_jdx_file(cache_path)
-                obj.name = resolve_name(cas=compound.cas_rn, nist_name=compound.name)
-                obj.metadata.update(metadata)
-                return obj
+                return _finalise(cls.from_jdx_file(cache_path))
 
-        # 3 — fetch from web and cache
+        # 3 — fetch from NIST and cache
+        logger.info("Fetching spectrum from NIST: %r (CAS %s)", compound.name, compound.cas_rn)
         compound.get_ms_spectra()
         if not compound.ms_specs:
             raise ValueError(f"No mass spectra available for {compound.name!r} on NIST.")
 
         jdx_text = compound.ms_specs[ms_index].jdx_text
         cache_path.write_text(jdx_text)
-        obj = cls.from_jdx(jdx_text, name=compound.name)
-        obj.metadata.update(metadata)
-        return obj
+        logger.debug("NIST spectrum cached to %s", cache_path)
+        return _finalise(cls.from_jdx(jdx_text, name=compound.name))
 
     @classmethod
     def from_rga(
@@ -362,7 +382,7 @@ class MassSpectrum:
             pd_ua              = rga.pd,
             n_open_scans       = int(rga_mask.sum()),
             scan_settings      = rga.scan_settings,
-            background_correct = hasattr(rga, "_raw_pressure"),
+            background_correct = hasattr(rga, "open_time"),
         )
         return cls(mz_full[nonzero], mean_pressure[nonzero],
                    name=name or rga.sample_name or "", metadata=metadata)
@@ -545,6 +565,51 @@ class MassSpectrum:
             if mz in idx_map:
                 out[idx_map[mz]] = inten / norm
         return out
+
+    # ------------------------------------------------------------------
+    # Filtering
+    # ------------------------------------------------------------------
+
+    def filter_mz(
+        self,
+        mz_min: int | None = None,
+        mz_max: int | None = None,
+        exclude: list[int] | None = None,
+        min_intensity: float | None = None,
+    ) -> "MassSpectrum":
+        """
+        Return a new MassSpectrum with peaks restricted by the given rules.
+
+        Parameters
+        ----------
+        mz_min        : drop all peaks with m/z < mz_min
+        mz_max        : drop all peaks with m/z > mz_max
+        exclude       : list of specific m/z values to drop (e.g. [2] to remove H2)
+        min_intensity : drop peaks whose intensity is below this fraction of the
+                        base peak (e.g. 0.01 removes anything below 1% of max).
+
+        Examples
+        --------
+        >>> ms.filter_mz(mz_min=3)                    # ignore H and H2
+        >>> ms.filter_mz(mz_min=3, mz_max=80)         # keep 3–80
+        >>> ms.filter_mz(exclude=[18, 28])            # drop water and CO/N2
+        >>> ms.filter_mz(min_intensity=0.01)          # drop noise below 1% of base peak
+        """
+        mask = np.ones(len(self.mz), dtype=bool)
+        if mz_min is not None:
+            mask &= self.mz >= mz_min
+        if mz_max is not None:
+            mask &= self.mz <= mz_max
+        if exclude is not None:
+            mask &= ~np.isin(self.mz, exclude)
+        if min_intensity is not None:
+            peak = self.intensity.max() or 1.0
+            mask &= self.intensity >= min_intensity * peak
+        return MassSpectrum(
+            self.mz[mask], self.intensity[mask],
+            name=self.name, metadata=self.metadata.copy(),
+            jdx_text=self._jdx_text,
+        )
 
     # ------------------------------------------------------------------
     # Spectrum comparison

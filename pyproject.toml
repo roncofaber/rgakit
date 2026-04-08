@@ -20,6 +20,8 @@ dependencies = [
     "platformdirs>=2.5.0",
     "plotly>=5.0.0",
     "nistchempy",
+    "dill",
+    "pubchempy",
 ]
 
 [project.urls]

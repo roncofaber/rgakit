@@ -1,35 +1,35 @@
 """
 nomenclature.py
 ---------------
-Helpers for resolving and normalising chemical compound names.
+Chemical name and metadata resolution via PubChem (pubchempy).
 
 Public API
 ----------
 normalize_nist_name(name)
-    Convert a NIST-style inverted name ("Propane, 2-iodo-") to a readable
-    form ("2-Iodopropane").
+    Convert a NIST-style inverted name to a readable form.
 
-cactus_preferred_name(cas, timeout)
-    Query the NCI Cactus IUPAC-name endpoint for a given CAS number.
-    Results are cached on disk so the network is queried at most once per CAS.
+get_compound_info(identifier, namespace="cas")
+    Fetch name, SMILES, formula, MW, CAS, InChIKey from PubChem.
+    Results are cached on disk keyed by CAS.
 
-resolve_name(cas, nist_name, timeout)
-    Convenience wrapper: try Cactus first, fall back to normalize_nist_name.
+resolve_name(cas, nist_name)
+    Convenience wrapper for display names:
+    hardcoded common name → PubChem IUPAC → normalised NIST name.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import re
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
 # Hardcoded common names
-# (override Cactus/IUPAC for universally recognised trivial names)
+# (override PubChem IUPAC for universally recognised trivial names)
 # ---------------------------------------------------------------------------
 
 _COMMON_NAMES: dict[str, str] = {
@@ -63,27 +63,17 @@ def normalize_nist_name(name: str) -> str:
     """
     Convert a NIST-style inverted name to a more readable form.
 
-    NIST (and CAS) store names as ``"Parent, substituent-"`` so that related
-    compounds sort together alphabetically.  This function reverses the
-    inversion and applies title-casing to the first alphabetic character.
-
     Examples
     --------
     >>> normalize_nist_name("Propane, 2-iodo-")
     '2-Iodopropane'
-    >>> normalize_nist_name("1-Pentene, 2,4,4-trimethyl-")
-    '2,4,4-Trimethyl-1-pentene'
-    >>> normalize_nist_name("Benzene, methyl-")
-    'Methylbenzene'
-    >>> normalize_nist_name("Carbon dioxide")   # unchanged — no comma pattern
+    >>> normalize_nist_name("Carbon dioxide")
     'Carbon dioxide'
     """
     m = _NIST_INVERTED_RE.match(name)
     if not m:
         return name
     parent, substituent = m.group(1).strip(), m.group(2).strip()
-    # Use a hyphen only when the parent starts with a locant digit
-    # (e.g. "1-Pentene") so substituent and parent don't run together.
     sep      = "-" if parent[0].isdigit() else ""
     combined = f"{substituent}{sep}{parent}".lower()
     for i, c in enumerate(combined):
@@ -93,113 +83,149 @@ def normalize_nist_name(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# NCI Cactus IUPAC-name resolution (with disk + in-process cache)
+# PubChem compound info (with disk + in-process cache)
 # ---------------------------------------------------------------------------
 
-_CACTUS_BASE  = "https://cactus.nci.nih.gov/chemical/structure/{}/iupac_name"
-_NAME_CACHE: dict | None = None   # populated lazily from disk on first access
+_CAS_RE     = re.compile(r'^\d+-\d+-\d+$')
+_INFO_CACHE: dict | None = None   # populated lazily
 
 
-def _name_cache_path() -> Path:
+def _cache_path() -> Path:
     try:
         from platformdirs import user_cache_dir
-        return Path(user_cache_dir("rgakit")) / "cactus_names.json"
+        return Path(user_cache_dir("rgakit")) / "pubchem_compounds.json"
     except ImportError:
-        return Path.home() / ".cache" / "rgakit" / "cactus_names.json"
+        return Path.home() / ".cache" / "rgakit" / "pubchem_compounds.json"
 
 
-def _get_name_cache() -> dict:
-    global _NAME_CACHE
-    if _NAME_CACHE is None:
-        p = _name_cache_path()
+def _get_cache() -> dict:
+    global _INFO_CACHE
+    if _INFO_CACHE is None:
+        p = _cache_path()
         try:
-            _NAME_CACHE = json.loads(p.read_text()) if p.exists() else {}
-        except Exception:
-            _NAME_CACHE = {}
-    return _NAME_CACHE
+            _INFO_CACHE = json.loads(p.read_text()) if p.exists() else {}
+            if _INFO_CACHE:
+                logger.debug("Loaded PubChem cache: %d entries from %s", len(_INFO_CACHE), p)
+        except Exception as e:
+            logger.warning("Could not read PubChem cache at %s (%s) - starting empty.", p, e)
+            _INFO_CACHE = {}
+    return _INFO_CACHE
 
 
-def _save_name_cache(cas: str, name: str) -> None:
-    """Persist a single CAS → name entry to the cache file."""
-    cache = _get_name_cache()
-    if cache.get(cas) == name:
-        return                          # already up-to-date, skip disk write
-    cache[cas] = name
-    p = _name_cache_path()
+def _persist(cas: str, data: dict) -> None:
+    cache = _get_cache()
+    if cache.get(cas) == data:
+        return
+    cache[cas] = data
+    p = _cache_path()
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(cache, indent=2))
-    except Exception:
-        pass                            # cache is best-effort
+        logger.debug("PubChem cache updated: %s written to %s", cas, p)
+    except Exception as e:
+        logger.warning("Could not write PubChem cache to %s: %s", p, e)
 
 
-def _title_case_iupac(text: str) -> str:
-    """Capitalise the first alphabetic character; lowercase the rest."""
-    for i, c in enumerate(text):
+def _cas_from_synonyms(synonyms: list[str]) -> str | None:
+    return next((s for s in synonyms if _CAS_RE.match(s)), None)
+
+
+def _cap(name: str) -> str:
+    """Capitalize the first alphabetic character of a compound name."""
+    for i, c in enumerate(name):
         if c.isalpha():
-            return text[:i] + c.upper() + text[i + 1:].lower()
-    return text
+            return name[:i] + c.upper() + name[i + 1:]
+    return name
 
 
-def cactus_preferred_name(cas: str, timeout: int = 6) -> str | None:
+# pubchempy namespace aliases (CAS numbers are looked up as names in PubChem)
+_PCP_NAMESPACE = {
+    "cas":      "name",
+    "name":     "name",
+    "smiles":   "smiles",
+    "inchikey": "inchikey",
+    "inchi":    "inchi",
+}
+
+
+def get_compound_info(
+    identifier: str,
+    namespace:  str = "cas",
+) -> dict | None:
     """
-    Return a clean preferred name for *cas* from NCI Cactus.
-
-    Uses the ``/iupac_name`` endpoint of the NCI Chemical Identifier Resolver
-    (https://cactus.nci.nih.gov/).  Results are cached in
-    ``~/.cache/rgakit/cactus_names.json`` so each CAS number is queried at
-    most once per machine.
+    Fetch compound metadata from PubChem and cache the result.
 
     Parameters
     ----------
-    cas     : CAS registry number (e.g. ``"75-30-9"``)
-    timeout : HTTP timeout in seconds
+    identifier : CAS number, compound name, SMILES, or InChIKey
+    namespace  : ``"cas"`` | ``"name"`` | ``"smiles"`` | ``"inchikey"``
 
     Returns
     -------
-    Cleaned IUPAC name string, or ``None`` on network failure, HTTP error, or
-    when the returned name is garbled (e.g. LaTeX-notation like
-    ``"$l^{1}-azane"`` for ammonia).
+    dict with keys: ``name``, ``iupac``, ``smiles``, ``formula``,
+    ``mw``, ``cas``, ``inchikey``  — or ``None`` if not found.
     """
-    if not cas or cas == "N/A":
-        return None
-
-    # In-process + disk cache check
-    cache = _get_name_cache()
-    if cas in cache:
-        return cache[cas] or None   # empty string marks a known failure
-
-    url = _CACTUS_BASE.format(urllib.parse.quote(cas, safe=""))
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
-            text = r.read().decode().strip().splitlines()[0].strip()
-    except Exception:
-        _save_name_cache(cas, "")
+        import pubchempy as pcp
+    except ImportError:
+        raise ImportError("pubchempy is required: pip install pubchempy")
+
+    # CAS cache hit (keyed by CAS string)
+    if namespace == "cas":
+        cache = _get_cache()
+        if identifier in cache:
+            logger.debug("PubChem cache hit: %s", identifier)
+            return cache[identifier]
+
+    pcp_ns    = _PCP_NAMESPACE.get(namespace, "name")
+    logger.debug("PubChem lookup: %s=%r", namespace, identifier)
+    compounds = pcp.get_compounds(identifier, pcp_ns)
+    if not compounds:
+        logger.debug("PubChem: no results for %s=%r", namespace, identifier)
         return None
 
-    # Reject garbled IUPAC notation (e.g. "$l^{1}-azane", "azane\nazane")
-    if not text or any(c in text for c in ("$", "^", "{", "}")):
-        _save_name_cache(cas, "")
-        return None
+    c   = compounds[0]
+    cas = _cas_from_synonyms(c.synonyms)
 
-    result = _title_case_iupac(text)
-    _save_name_cache(cas, result)
-    return result
+    # Cache hit via resolved CAS (e.g. name/smiles lookup whose CAS was cached)
+    if cas and namespace != "cas":
+        cache = _get_cache()
+        if cas in cache:
+            logger.debug("PubChem cache hit (via resolved CAS %s)", cas)
+            return cache[cas]
+
+    data = {
+        "name":     _cap(_COMMON_NAMES.get(cas or "", "") or c.iupac_name or ""),
+        "iupac":    c.iupac_name or "",
+        "smiles":   c.smiles or "",
+        "formula":  c.molecular_formula or "",
+        "mw":       str(c.molecular_weight or ""),
+        "cas":      cas or "",
+        "inchikey": c.inchikey or "",
+    }
+
+    if cas:
+        logger.debug("PubChem resolved %r: CAS=%s, name=%r", identifier, cas, data["name"])
+        _persist(cas, data)
+    else:
+        logger.debug("PubChem resolved %r: name=%r (no CAS)", identifier, data["name"])
+    return data
 
 
-def resolve_name(cas: str = "", nist_name: str = "", timeout: int = 6) -> str:
+# ---------------------------------------------------------------------------
+# Display-name resolver (used when loading spectra)
+# ---------------------------------------------------------------------------
+
+def resolve_name(cas: str = "", nist_name: str = "", **_) -> str:
     """
-    Return the best available name for a compound.
+    Return the best display name for a compound.
 
-    Priority: hardcoded common name → Cactus IUPAC → normalised NIST name.
-
-    Parameters
-    ----------
-    cas       : CAS registry number (optional)
-    nist_name : raw NIST title string (used as fallback)
-    timeout   : Cactus HTTP timeout in seconds
+    Priority: hardcoded common name → PubChem IUPAC → normalised NIST name.
     """
     if cas and cas in _COMMON_NAMES:
         return _COMMON_NAMES[cas]
-    return (cactus_preferred_name(cas, timeout=timeout)
-            or normalize_nist_name(nist_name))
+    if cas:
+        info = get_compound_info(cas, "cas")
+        if info and info.get("name"):
+            return _cap(info["name"])
+    return normalize_nist_name(nist_name)
