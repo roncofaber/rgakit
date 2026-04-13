@@ -26,6 +26,7 @@ class FitResult:
         metadata:               dict | None                    = None,
         fit_params:             dict | None                    = None,
         spectral_contributions: dict[str, np.ndarray] | None  = None,
+        obs_total_full:         float | None                   = None,
     ):
         self.weights                = weights
         self.residual               = residual
@@ -35,6 +36,11 @@ class FitResult:
         self.metadata               = metadata   or {}
         self.fit_params             = fit_params or {}
         self.spectral_contributions = spectral_contributions  # {name: A[:,j]*w_j}
+        # Total normalized intensity of the *full* observed spectrum (all m/z,
+        # before grid intersection).  Used so that percentages are expressed as
+        # a fraction of everything the instrument measured, not just what the
+        # library covers.  None for objects loaded from old pickle files.
+        self.obs_total_full         = obs_total_full
 
     @property
     def contributions(self) -> dict[str, float]:
@@ -73,7 +79,9 @@ class FitResult:
         print_output : if True (default), also print to stdout
         """
         contribs  = {k: v for k, v in self.contributions.items() if v >= threshold}
-        obs_total = float(np.sum(self.observed)) or 1.0
+        # Denominator: full-spectrum normalized total if available (so percentages
+        # are wrt everything the instrument measured), else fall back to in-grid sum.
+        obs_total = float(self.obs_total_full) if self.obs_total_full else (float(np.sum(self.observed)) or 1.0)
 
         # Spectral coverage: fraction of observed total explained by each compound
         sc = self.spectral_contributions

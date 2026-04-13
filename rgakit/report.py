@@ -40,7 +40,7 @@ def plot_contributions(
     contribs  = {k: v for k, v in result.contributions.items() if v >= threshold}
     names     = list(contribs.keys())
     sc        = getattr(result, "spectral_contributions", None)
-    obs_total = float(np.sum(result.observed)) or 1.0
+    obs_total = float(getattr(result, "obs_total_full", None) or np.sum(result.observed)) or 1.0
     if sc is not None:
         pcts = [100.0 * float(np.sum(sc[n])) / obs_total for n in names]
     else:
@@ -180,10 +180,11 @@ body {
 .rgakit-nav-brand-row { display: flex; align-items: center; gap: 6px; line-height: 1; }
 .rgakit-github-icon { width: 18px; height: 18px; fill: currentColor; flex-shrink: 0; }
 .rgakit-nav-brand-name { font-size: 0.88em; font-weight: 700; }
-/* version indented to align under the name (icon 18px + gap 6px = 24px) */
-.rgakit-nav-brand-ver { font-size: 0.65em; color: #aaa; padding-left: 24px; margin-top: 1px; }
-/* Timestamp — margin-left:auto pushes it (and the brand after it) to the right */
-.rgakit-nav-ts { margin-left: auto; font-size: 0.68em; color: #bbb; padding: 0 12px 0 8px; flex-shrink: 0; white-space: nowrap; }
+/* version inline after name; timestamp on its own line below */
+.rgakit-nav-brand-ver { font-size: 0.72em; color: #aaa; margin-left: 3px; }
+.rgakit-nav-ts { font-size: 0.65em; color: #bbb; padding-left: 24px; margin-top: 2px; white-space: nowrap; }
+/* Push the whole brand block to the far right */
+.rgakit-nav-brand { margin-left: auto; }
 
 .page-wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
 
@@ -247,16 +248,44 @@ body {
 .fit-info-table .fik { color: #aaa; text-align: right; white-space: nowrap; padding-right: 6px; }
 .fit-info-table .fiv { color: #444; font-weight: 500; text-align: left; border-left: 1px solid #eee; padding-left: 8px; }
 
-/* Unexplained peaks */
-.unexplained-peaks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.unexp-tag {
-    background: #fff0f0; border: 1px solid #fcc; border-radius: 4px;
-    padding: 3px 10px; font-size: 12px; color: #c00; font-family: monospace;
+/* Unexplained peaks table */
+.unexp-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+.unexp-table th { background: #f8f8f8; text-align: left; padding: 6px 12px;
+    border-bottom: 2px solid #e0e0e0; font-weight: 600; color: #555; white-space: nowrap; }
+.unexp-table td { padding: 6px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+.unexp-table tr:hover td { background: #fafafa; }
+.unexp-mz  { font-weight: bold; font-size: 14px; font-family: monospace; }
+.unexp-val { font-family: monospace; color: #444; }
+.unexp-bar-wrap { height: 7px; background: #ececec; border-radius: 4px; min-width: 80px; margin-top: 3px; }
+.unexp-bar { height: 100%; border-radius: 4px; }
+.unexp-sev-low  { color: #92710a; }
+.unexp-sev-mid  { color: #c2410c; }
+.unexp-sev-high { color: #b91c1c; }
+.unexp-row-low  td:first-child { border-left: 3px solid #d4a400; }
+.unexp-row-mid  td:first-child { border-left: 3px solid #ea580c; }
+.unexp-row-high td:first-child { border-left: 3px solid #dc2626; }
+
+/* Collapsible compound groups */
+.compound-group { border: 1px solid #eee; border-radius: 6px; margin-bottom: 12px; overflow: hidden; }
+.compound-group summary {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; cursor: pointer; user-select: none;
+    font-size: 0.95em; font-weight: 600; color: #444;
+    background: #fafafa; list-style: none;
 }
-.unexp-tag .unexp-pct { font-weight: bold; }
+.compound-group summary::-webkit-details-marker { display: none; }
+.compound-group summary::before {
+    content: "▶"; font-size: 0.7em; color: #aaa;
+    transition: transform 0.2s; flex-shrink: 0;
+}
+.compound-group[open] summary::before { transform: rotate(90deg); }
+.compound-group summary:hover { background: #f4f4f4; }
+.compound-group-body { padding: 12px 14px 14px; }
+.compound-group-label { flex: 1; }
+.compound-group-count { font-weight: normal; font-size: 0.88em; color: #999; }
 
 /* Undetected library compounds */
-.undetected-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.undetected-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 0; }
 .undetected-card {
     width: 140px; border: 1px solid #e5e5e5; border-radius: 6px;
     padding: 8px; text-align: center; cursor: default; background: #fafafa;
@@ -271,13 +300,15 @@ body {
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* Detected compound cards */
-.detected-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.detected-grid { display: flex; flex-wrap: wrap; gap: 10px; }
 .detected-card {
     width: 140px; border: 1px solid #e5e5e5; border-top-width: 3px;
     border-radius: 6px; padding: 8px; text-align: center; cursor: default;
     background: #fff; transition: box-shadow 0.15s;
 }
-.detected-card:hover { box-shadow: 0 2px 10px rgba(0,0,0,.12); }
+.detected-card   { cursor: pointer; }
+.undetected-card { cursor: pointer; }
+.detected-card:hover   { box-shadow: 0 2px 10px rgba(0,0,0,.12); }
 .detected-card img { width: 120px; height: 120px; object-fit: contain; display: block; margin: 0 auto; }
 .detected-card-ph { width: 120px; height: 120px; display: flex; align-items: center;
     justify-content: center; color: #ddd; font-size: 40px; margin: 0 auto; }
@@ -347,6 +378,41 @@ body {
 }
 .legend-label { flex: 1; white-space: normal; word-break: break-word; line-height: 1.3; }
 .legend-pct { color: #999; font-size: 0.88em; flex-shrink: 0; padding-top: 1px; }
+
+/* Compound spectrum popup modal */
+.rgakit-modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.45); z-index: 500;
+    align-items: center; justify-content: center;
+}
+.rgakit-modal-overlay.open { display: flex; }
+.rgakit-modal-box {
+    background: #fff; border-radius: 12px;
+    width: min(700px, 94vw); max-height: 88vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 8px 40px rgba(0,0,0,.28);
+    overflow: hidden;
+}
+.rgakit-modal-header {
+    display: flex; gap: 14px; align-items: flex-start;
+    padding: 18px 20px 14px; border-bottom: 1px solid #eee;
+    flex-shrink: 0; position: relative;
+}
+.rgakit-modal-close {
+    position: absolute; top: 10px; right: 12px;
+    font-size: 1.5em; color: #bbb; cursor: pointer;
+    background: none; border: none; line-height: 1; padding: 0 4px;
+}
+.rgakit-modal-close:hover { color: #333; }
+.rgakit-modal-info { flex: 1; min-width: 0; padding-right: 28px; }
+.rgakit-modal-name    { font-size: 1.05em; font-weight: 700; color: #1a1a1a; margin-bottom: 2px;
+                        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rgakit-modal-formula { font-size: 0.92em; color: #333; margin-bottom: 4px; }
+.rgakit-modal-meta    { font-size: 0.75em; color: #aaa; }
+.rgakit-modal-struct  { width: 90px; height: 90px; object-fit: contain; flex-shrink: 0;
+                        border-radius: 6px; background: #fafafa;
+                        border: 1.5px solid #222; box-sizing: border-box; }
+.rgakit-modal-plot-wrap { flex: 1; min-height: 200px; max-height: 340px; padding: 6px 10px 10px; }
 """
 
 # ---------------------------------------------------------------------------
@@ -410,17 +476,62 @@ def _smiles_to_svg(smiles: str, size: int = 200, padding: float = 0.02) -> str |
         return None
 
 
-def _get_structure(name: str, cas: str | None = None) -> str | None:
-    """
-    Return a base64 SVG data URI for a compound structure.
+_PUBCHEM_MIN_INTERVAL = 0.25   # seconds between requests (≤ 4 req/s, well under PubChem's 5/s limit)
+_pubchem_last_call    = 0.0    # module-level timestamp of the last PubChem request
 
-    Uses pubchempy to look up the compound (by CAS first, then by name),
-    extracts the isomeric SMILES, and renders locally with RDKit.
-    SMILES are cached to disk so PubChem is only contacted once per compound.
-    """
-    import re
+
+def _pubchem_get(identifier: str):
+    """Rate-limited, retry-on-503 wrapper around pubchempy.get_compounds."""
+    import time
     import pubchempy as pcp
 
+    global _pubchem_last_call
+
+    max_retries = 4
+    for attempt in range(max_retries):
+        # Enforce minimum interval between requests
+        elapsed = time.monotonic() - _pubchem_last_call
+        wait    = _PUBCHEM_MIN_INTERVAL - elapsed
+        if wait > 0:
+            time.sleep(wait)
+
+        try:
+            _pubchem_last_call = time.monotonic()
+            return pcp.get_compounds(identifier, 'name')
+        except Exception as exc:
+            # Retry on server-busy (503); give up on anything else
+            if "503" in str(exc) or "ServerBusy" in type(exc).__name__:
+                backoff = _PUBCHEM_MIN_INTERVAL * (2 ** attempt)
+                logger.warning(
+                    "PubChem busy (attempt %d/%d) for %r — retrying in %.1fs",
+                    attempt + 1, max_retries, identifier, backoff,
+                )
+                time.sleep(backoff)
+            else:
+                raise
+    logger.warning("PubChem request failed after %d attempts for %r", max_retries, identifier)
+    return []
+
+
+def _get_structure(name: str, cas: str | None = None, smiles: str | None = None) -> str | None:
+    """
+    Return a base64 SVG data URI for a compound structure rendered by RDKit.
+
+    If *smiles* is provided (e.g. from library metadata) it is used directly
+    and neither the disk cache nor PubChem are consulted.  Otherwise the disk
+    cache is checked first; PubChem is only contacted as a last resort.
+    """
+    import re
+
+    # Fast path: SMILES already known (library metadata carries it for NIST compounds)
+    if smiles:
+        logger.debug("Rendering structure from provided SMILES for %r", name)
+        svg = _smiles_to_svg(smiles)
+        if svg is None:
+            logger.warning("RDKit could not render structure for %r (SMILES: %s).", name, smiles)
+        return svg
+
+    # Disk cache
     safe         = re.sub(r'[^\w\-]', '_', cas or name)[:80]
     smiles_cache = _STRUCTURE_CACHE_DIR / f"{safe}.smi"
 
@@ -431,10 +542,11 @@ def _get_structure(name: str, cas: str | None = None) -> str | None:
         else:
             logger.debug("Structure cache hit (no SMILES): %s", name)
     else:
+        # PubChem fallback — only reached for compounds without library SMILES
         smiles = None
         for identifier in filter(None, [cas, name]):
             logger.debug("Fetching SMILES from PubChem: %r", identifier)
-            hits = pcp.get_compounds(identifier, 'name')
+            hits = _pubchem_get(identifier)
             if hits:
                 smiles = hits[0].smiles
                 logger.debug("SMILES found for %r: %s", name, smiles)
@@ -862,7 +974,9 @@ def generate_report(
     weights   = list(contribs.values())
 
     sc        = getattr(result, "spectral_contributions", None)
-    obs_total = float(np.sum(result.observed)) or 1.0
+    # Use full-spectrum total so percentages are wrt everything the instrument
+    # measured, not just the portion covered by the library grid.
+    obs_total = float(getattr(result, "obs_total_full", None) or np.sum(result.observed)) or 1.0
     if sc is not None:
         pcts = [100.0 * float(np.sum(sc[n])) / obs_total for n in names]
     else:
@@ -888,10 +1002,31 @@ def generate_report(
         all_fetch = names + (undetected if fetch_undetected_structures else [])
         if all_fetch:
             for n in all_fetch:
-                cas = library[n].metadata.get("cas") if library is not None else None
-                structures[n] = _get_structure(n, cas)
+                meta   = library[n].metadata if library is not None else {}
+                cas    = meta.get("cas")
+                smiles = meta.get("smiles")
+                structures[n] = _get_structure(n, cas, smiles)
             found = sum(1 for v in structures.values() if v)
             logger.info("Structures: %d/%d rendered successfully.", found, len(all_fetch))
+
+    # Embed reference spectra for the compound popup modal
+    _lib_spectra: dict = {}
+    if library is not None:
+        for _n in names + undetected:
+            try:
+                _sp = library[_n]
+                _meta = _sp.metadata
+                _lib_spectra[_n] = {
+                    "mz":        _sp.mz.tolist(),
+                    "intensity": _sp.normalized.tolist(),
+                    "formula":   _meta.get("formula", ""),
+                    "cas":       _meta.get("cas", ""),
+                    "mw":        str(_meta.get("mw", "")),
+                    "svg":       structures.get(_n) or "",
+                }
+            except Exception:
+                pass
+    _lib_spectra_json = json.dumps(_lib_spectra)
 
     sections: list[tuple[str, str]] = []   # (heading, div_html)
 
@@ -963,20 +1098,22 @@ def generate_report(
         row_heights=[0.68, 0.32],
         vertical_spacing=0.06,
     )
-    # Mirror plot: Observed bars grow upward (+y), Fitted bars grow downward (−y).
-    # They share the same x positions but can never visually overlap.
-    fig_spec.add_trace(go.Bar(
-        x=result.grid, y=-result.fitted,
-        name="Fitted",
-        marker_color="rgba(31,119,180,0.75)",
-        customdata=result.fitted,
-        hovertemplate="Fitted: %{customdata:.4f}<extra></extra>",
-    ), row=1, col=1)
+    # Overlay plot: both traces on the same axis.
+    # Observed below (added first), Fitted on top (added last, semi-transparent).
+    # Alpha lets the viewer read over/under-explanation directly:
+    #   fitted > observed → blue extends above orange (over-fitted)
+    #   fitted < observed → orange peeks above the shorter blue bar (under-fitted)
     fig_spec.add_trace(go.Bar(
         x=result.grid, y=result.observed,
         name="Observed",
-        marker_color=_OBSERVED_COLOR,
+        marker_color="rgba(255,127,14,0.70)",
         hovertemplate="Observed: %{y:.4f}<extra></extra>",
+    ), row=1, col=1)
+    fig_spec.add_trace(go.Bar(
+        x=result.grid, y=result.fitted,
+        name="Fitted",
+        marker_color="rgba(31,119,180,0.60)",
+        hovertemplate="Fitted: %{y:.4f}<extra></extra>",
     ), row=1, col=1)
     fig_spec.add_trace(go.Bar(
         x=result.grid[pos_mask], y=residual_arr[pos_mask],
@@ -992,9 +1129,15 @@ def generate_report(
     ), row=2, col=1)
     fig_spec.add_hline(y=0, line_width=1, line_color="black", row=2, col=1)
 
-    ymax1    = _ymax_without(np.maximum(result.observed, result.fitted), result.grid, exclude_mz=fit_exclude_mz)
+    # Y-axis bounds come from the observed spectrum only — the measured data
+    # defines the scale, not the fit.  fit_exclude_mz controls the fit only.
+    ymax1    = _ymax_without(result.observed, result.grid, exclude_mz=())
     ymax_res = _ymax_without(np.abs(residual_arr), result.grid, exclude_mz=fit_exclude_mz)
     spec_height = _SPECTRUM_PLOT_HEIGHT + _RESIDUAL_PLOT_HEIGHT
+
+    # x limits: span the full observed m/z range (result.grid == all observed channels)
+    x_lo = float(result.grid[0])  - 1.0
+    x_hi = float(result.grid[-1]) + 1.0
 
     fig_spec.update_layout(
         **_LAYOUT_BASE,
@@ -1003,32 +1146,18 @@ def generate_report(
         height=spec_height,
         margin=dict(l=60, r=40, t=30, b=50),
     )
-    fig_spec.update_yaxes(
-        title_text="Relative intensity",
-        zeroline=True, zerolinewidth=1.5, zerolinecolor="#888",
-        row=1, col=1,
-    )
+    fig_spec.update_yaxes(title_text="Relative intensity", row=1, col=1)
     fig_spec.update_yaxes(title_text="Observed − Fitted",  row=2, col=1)
     fig_spec.update_xaxes(title_text="m/z", row=2, col=1)
     fig_spec.update_xaxes(
+        range=[x_lo, x_hi],
         showspikes=True, spikemode="across",
         spikecolor="#aaa", spikethickness=1, spikesnap="cursor",
     )
     if ymax1:
-        # Symmetric range: Observed goes up to +ymax1, Fitted down to −ymax1
-        fig_spec.update_yaxes(range=[-ymax1, ymax1], row=1, col=1)
+        fig_spec.update_yaxes(range=[0, ymax1], row=1, col=1)
     if ymax_res:
         fig_spec.update_yaxes(range=[-ymax_res, ymax_res], row=2, col=1)
-
-    # Corner labels to orient the reader for the mirror layout
-    fig_spec.add_annotation(x=0.01, y=0.97, text="Observed ↑",
-        font=dict(size=10, color="rgba(200,100,14,0.9)"),
-        xanchor="left", yanchor="top", xref="x domain", yref="y domain",
-        showarrow=False, row=1, col=1)
-    fig_spec.add_annotation(x=0.01, y=0.03, text="Fitted ↓",
-        font=dict(size=10, color="rgba(31,119,180,0.9)"),
-        xanchor="left", yanchor="bottom", xref="x domain", yref="y domain",
-        showarrow=False, row=1, col=1)
 
     sections.append((
         "Observed vs Fitted Spectrum",
@@ -1039,20 +1168,46 @@ def generate_report(
     # Section 2 — Unexplained peaks (shown right after spectrum)
     # ------------------------------------------------------------------ #
     if unexp_peaks:
-        tags = "".join(
-            f'<span class="unexp-tag">'
-            f'm/z&nbsp;<b>{mz}</b> '
-            f'<span class="unexp-pct">({res/obs*100:.0f}%)</span>'
-            f'</span>'
-            for mz, res, obs in unexp_peaks
-            if obs > 0
+        # Sort by unexplained fraction descending (most proportionally problematic first)
+        _unexp_sorted = sorted(
+            [(mz, res, obs) for mz, res, obs in unexp_peaks if obs > 0],
+            key=lambda t: t[1] / t[2], reverse=True,
         )
+        rows = []
+        for mz, res, obs in _unexp_sorted:
+            pct     = res / obs * 100
+            bar_w   = min(100, pct)
+            if pct < 30:
+                sev, bar_color = "low",  "#d4a400"
+            elif pct < 60:
+                sev, bar_color = "mid",  "#ea580c"
+            else:
+                sev, bar_color = "high", "#dc2626"
+            rows.append(
+                f'<tr class="unexp-row-{sev}">'
+                f'<td class="unexp-mz unexp-sev-{sev}">{mz}</td>'
+                f'<td class="unexp-val">{obs:.4f}</td>'
+                f'<td class="unexp-val">{res:.4f}</td>'
+                f'<td>'
+                f'<span class="unexp-sev-{sev}" style="font-weight:600">{pct:.0f}%</span>'
+                f'<div class="unexp-bar-wrap">'
+                f'<div class="unexp-bar" style="width:{bar_w:.0f}%;background:{bar_color}"></div>'
+                f'</div>'
+                f'</td>'
+                f'</tr>'
+            )
+        _n = len(rows)
         unexp_body = (
-            '<p style="font-size:13px;color:#888;margin:0 0 10px;">'
-            'These m/z channels have significant unexplained signal. '
-            'Consider whether compounds at these masses are missing from the library. '
-            'Percentages show the fraction of that channel\'s observed signal that is unaccounted for.</p>'
-            f'<div class="unexplained-peaks">{tags}</div>'
+            f'<p style="font-size:13px;color:#888;margin:0 0 10px;">'
+            f'<b>{_n}</b> m/z channel{"s" if _n != 1 else ""} with unexplained signal above '
+            f'{unexplained_threshold*100:.0f}% of the observed maximum. '
+            f'These likely correspond to compounds absent from the library.</p>'
+            f'<table class="unexp-table">'
+            f'<thead><tr>'
+            f'<th>m/z</th><th>Observed</th><th>Residual</th><th>Unexplained</th>'
+            f'</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody>'
+            f'</table>'
         )
         sections.append(("Unexplained Peaks", unexp_body))
 
@@ -1191,10 +1346,13 @@ def generate_report(
     # ------------------------------------------------------------------ #
     # Section 4 — Compound structures (detected + not detected)
     # ------------------------------------------------------------------ #
+    import html as _html_mod
+
     def _det_card(n: str, pct: float, color: str, formula: str = "") -> str:
-        src = structures.get(n)
+        src  = structures.get(n)
+        attr = _html_mod.escape(n, quote=True)
         inner = (
-            f'<img src="{src}" alt="{n}">'
+            f'<img src="{src}" alt="{attr}">'
             if src else
             '<div class="detected-card-ph">?</div>'
         )
@@ -1203,7 +1361,8 @@ def generate_report(
             if formula else ""
         )
         return (
-            f'<div class="detected-card" style="border-top-color:{color};" title="{n}">'
+            f'<div class="detected-card" style="border-top-color:{color};"'
+            f' title="{attr}" data-spec-name="{attr}">'
             f'{inner}'
             f'<div class="detected-card-name">{n}</div>'
             f'{formula_html}'
@@ -1212,14 +1371,15 @@ def generate_report(
         )
 
     def _undet_card(n: str) -> str:
-        src = structures.get(n)
+        src  = structures.get(n)
+        attr = _html_mod.escape(n, quote=True)
         inner = (
-            f'<img src="{src}" alt="{n}">'
+            f'<img src="{src}" alt="{attr}">'
             if src else
             '<div class="undetected-card-ph">?</div>'
         )
         return (
-            f'<div class="undetected-card" data-name="{n}" title="{n}">'
+            f'<div class="undetected-card" title="{attr}" data-spec-name="{attr}">'
             f'{inner}'
             f'<div class="undetected-card-name">{n}</div>'
             f'</div>'
@@ -1236,17 +1396,26 @@ def generate_report(
 
     n_lib_total  = len(names) + len(undetected)
     undet_block  = f"""
-<h3 style="font-size:0.95em;color:#888;margin:20px 0 8px;border-top:1px solid #eee;padding-top:14px;">
-  Not detected
-  <span style="font-weight:normal;font-size:0.9em;">
-    ({len(undetected)} of {n_lib_total} library compounds below threshold &lt; {threshold:.0e})
-  </span>
-</h3>
-<div class="undetected-grid">{undet_cards}</div>""" if undetected else ""
+<details class="compound-group">
+  <summary>
+    <span class="compound-group-label">Not detected</span>
+    <span class="compound-group-count">{len(undetected)} of {n_lib_total} library compounds — weight below {threshold:.0e}</span>
+  </summary>
+  <div class="compound-group-body">
+    <div class="undetected-grid">{undet_cards}</div>
+  </div>
+</details>""" if undetected else ""
 
     structures_body = f"""
-<h3 style="font-size:0.95em;color:#444;margin:0 0 8px;">Detected</h3>
-<div class="detected-grid">{det_cards}</div>
+<details class="compound-group" open>
+  <summary>
+    <span class="compound-group-label">Detected</span>
+    <span class="compound-group-count">{len(names)} compound{"s" if len(names) != 1 else ""}</span>
+  </summary>
+  <div class="compound-group-body">
+    <div class="detected-grid">{det_cards}</div>
+  </div>
+</details>
 {undet_block}"""
     sections.append(("Compound Structures", structures_body))
 
@@ -1677,14 +1846,14 @@ def generate_report(
     )
     nav_html = (
         f'<nav class="rgakit-nav">{nav_links}'
-        f'<span class="rgakit-nav-ts">Report created at: {_report_ts}</span>'
         f'<a class="rgakit-nav-brand" href="{_REPO_URL}"'
         f' target="_blank" rel="noopener" title="rgakit on GitHub">'
         f'<span class="rgakit-nav-brand-row">'
         f'{_github_icon}'
         f'<span class="rgakit-nav-brand-name">rgakit</span>'
-        f'</span>'
         f'<span class="rgakit-nav-brand-ver">v{_rgakit_ver}</span>'
+        f'</span>'
+        f'<span class="rgakit-nav-ts">Created at: {_report_ts}</span>'
         f'</a>'
         f'</nav>'
     )
@@ -1731,7 +1900,7 @@ def generate_report(
   <script>
   (function() {{
     var navLinks = {{}};
-    document.querySelectorAll('.rgakit-nav > a').forEach(function(a) {{
+    document.querySelectorAll('.rgakit-nav > a:not(.rgakit-nav-brand)').forEach(function(a) {{
       navLinks[a.getAttribute('href').slice(1)] = a;
     }});
     var secs = Array.from(document.querySelectorAll('.section[id]'));
@@ -1747,6 +1916,105 @@ def generate_report(
     }}
     window.addEventListener('scroll', updateActive, {{ passive: true }});
     updateActive();
+  }})();
+  </script>
+
+  <!-- Compound spectrum modal -->
+  <div id="rgakit-spec-modal" class="rgakit-modal-overlay">
+    <div class="rgakit-modal-box">
+      <div class="rgakit-modal-header">
+        <div class="rgakit-modal-info">
+          <div id="rgakit-modal-name"    class="rgakit-modal-name"></div>
+          <div id="rgakit-modal-formula" class="rgakit-modal-formula"></div>
+          <div id="rgakit-modal-meta"    class="rgakit-modal-meta"></div>
+        </div>
+        <img id="rgakit-modal-struct" class="rgakit-modal-struct" src="" alt="" style="display:none;">
+        <button class="rgakit-modal-close" id="rgakit-modal-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="rgakit-modal-plot-wrap">
+        <div id="rgakit-modal-plot" style="width:100%;height:100%;"></div>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function() {{
+    var SPECS   = {_lib_spectra_json};
+    var modal   = document.getElementById('rgakit-spec-modal');
+    var plotEl  = document.getElementById('rgakit-modal-plot');
+    var structEl = document.getElementById('rgakit-modal-struct');
+    var rendered = false;
+
+    function formulaToHtml(f) {{
+      return f.replace(/(\\d+)/g, '<sub>$1</sub>');
+    }}
+
+    function openSpecModal(name) {{
+      var spec = SPECS[name];
+      if (!spec) return;
+
+      document.getElementById('rgakit-modal-name').textContent = name;
+      document.getElementById('rgakit-modal-formula').innerHTML =
+        spec.formula ? formulaToHtml(spec.formula) : '';
+
+      var parts = [];
+      if (spec.cas) parts.push('CAS\u00a0' + spec.cas);
+      if (spec.mw)  parts.push('MW\u00a0'  + spec.mw);
+      document.getElementById('rgakit-modal-meta').textContent =
+        parts.join('\u2002\u00b7\u2002');
+
+      if (spec.svg) {{
+        structEl.src = spec.svg;
+        structEl.style.display = 'block';
+      }} else {{
+        structEl.style.display = 'none';
+      }}
+
+      var plotHeight = Math.max(200,
+        document.querySelector('.rgakit-modal-plot-wrap').clientHeight - 16);
+      var trace = {{
+        type: 'bar',
+        x: spec.mz,
+        y: spec.intensity,
+        marker: {{ color: 'rgba(30,30,30,0.82)' }},
+        hovertemplate: 'm/z\u00a0%{{x}}:  %{{y:.3f}}<extra></extra>',
+      }};
+      var layout = {{
+        template: 'plotly_white',
+        hovermode: 'x unified',
+        xaxis: {{ title: {{ text: 'm/z' }}, fixedrange: false,
+                  showspikes: true, spikemode: 'across',
+                  spikecolor: '#aaa', spikethickness: 1, spikesnap: 'cursor' }},
+        yaxis: {{ title: {{ text: 'Rel. intensity' }}, range: [0, 1.08], fixedrange: false }},
+        margin: {{ l: 55, r: 20, t: 10, b: 50 }},
+        height: plotHeight,
+        autosize: true,
+      }};
+      if (rendered) {{
+        Plotly.react(plotEl, [trace], layout);
+      }} else {{
+        Plotly.newPlot(plotEl, [trace], layout, {{responsive: true}});
+        rendered = true;
+      }}
+      modal.classList.add('open');
+    }}
+
+    function closeSpecModal() {{
+      modal.classList.remove('open');
+    }}
+
+    document.getElementById('rgakit-modal-close').addEventListener('click', closeSpecModal);
+    modal.addEventListener('click', function(e) {{
+      if (e.target === modal) closeSpecModal();
+    }});
+    document.addEventListener('keydown', function(e) {{
+      if (e.key === 'Escape') closeSpecModal();
+    }});
+
+    document.querySelectorAll('[data-spec-name]').forEach(function(el) {{
+      el.addEventListener('click', function() {{
+        openSpecModal(this.dataset.specName);
+      }});
+    }});
   }})();
   </script>
 </body>

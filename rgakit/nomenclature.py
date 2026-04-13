@@ -184,8 +184,18 @@ def get_compound_info(
         logger.debug("PubChem: no results for %s=%r", namespace, identifier)
         return None
 
-    c   = compounds[0]
-    cas = _cas_from_synonyms(c.synonyms)
+    c = compounds[0]
+    # Suppress pubchempy's own 404 log — no synonyms is expected for
+    # unusual fragments and does not indicate a real error.
+    _pcp_log = logging.getLogger("pubchempy")
+    _old_lvl = _pcp_log.level
+    _pcp_log.setLevel(logging.CRITICAL)
+    try:
+        cas = _cas_from_synonyms(c.synonyms)
+    except Exception:
+        cas = None
+    finally:
+        _pcp_log.setLevel(_old_lvl)
 
     # Cache hit via resolved CAS (e.g. name/smiles lookup whose CAS was cached)
     if cas and namespace != "cas":

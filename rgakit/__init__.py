@@ -13,6 +13,9 @@ from .nomenclature import normalize_nist_name, get_compound_info, resolve_name
 from .similarity   import score, pairwise
 from .background   import background_correct
 from .solvers      import make_solver, SUPPORTED_METHODS
+from .molecule     import Compound
+from .databases    import (InSilicoDatabase, MassBankDatabase,
+                           MonaDatabase, MonaLocalDatabase, NistDatabase)
 
 # Standard library practice: add NullHandler so logs are silently discarded
 # unless the calling application configures logging.
@@ -60,4 +63,10 @@ __all__ = [
     "make_solver",
     "SUPPORTED_METHODS",
     "setup_logging",
+    "Compound",
+    "InSilicoDatabase",
+    "MassBankDatabase",
+    "MonaDatabase",
+    "MonaLocalDatabase",
+    "NistDatabase",
 ]

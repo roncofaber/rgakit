@@ -1,6 +1,5 @@
 """
 spectrum.py
------------
 MassSpectrum: a single compound's electron-ionisation mass spectrum.
 """
 
@@ -81,7 +80,7 @@ def _parse_jdx(jdx_text: str) -> tuple[np.ndarray, np.ndarray, dict]:
 # MSP parsing helpers
 # ---------------------------------------------------------------------------
 
-# NIST MSP field names → internal metadata keys
+# NIST MSP field names mapped to internal metadata keys
 _MSP_FIELD_MAP = {
     "name":     "name",
     "cas#":     "cas",
@@ -203,6 +202,30 @@ class MassSpectrum:
             raise ValueError("mz and intensity must have the same length.")
 
     # ------------------------------------------------------------------
+    # Typed metadata properties
+    # ------------------------------------------------------------------
+
+    @property
+    def inchikey(self) -> str | None:
+        """Standard InChIKey (27 chars). Reads from metadata, normalising key names."""
+        return self.metadata.get("inchikey") or self.metadata.get("inchi_key")
+
+    @property
+    def cas(self) -> str | None:
+        """CAS registry number string, or None."""
+        return self.metadata.get("cas")
+
+    @property
+    def formula(self) -> str | None:
+        """Molecular formula string (Hill notation), or None."""
+        return self.metadata.get("formula")
+
+    @property
+    def source(self) -> str | None:
+        """Origin tag: ``'nist'``, ``'massbank'``, ``'in_silico'``, ``'theoretical'``, or None."""
+        return self.metadata.get("source")
+
+    # ------------------------------------------------------------------
     # Constructors
     # ------------------------------------------------------------------
 
@@ -240,6 +263,8 @@ class MassSpectrum:
         name:      str | None        = None,
         cas:       str | None        = None,
         smiles:    str | None        = None,
+        inchikey:  str | None        = None,
+        formula:   str | None        = None,
         ms_index:  int               = 0,
         local_dir: str | Path | None = None,
     ) -> "MassSpectrum":
@@ -252,13 +277,15 @@ class MassSpectrum:
           3. NIST WebBook (fetched and saved to cache for future calls).
 
         Files are stored as ``{compound.ID}_MS_{ms_index}.jdx`` (NIST naming).
-        PubChem is queried once per compound to enrich metadata with SMILES.
 
         Parameters
         ----------
-        name, cas, smiles : compound identifier (provide one)
-        ms_index          : which spectrum to use when multiple are available
-        local_dir         : optional extra source directory (e.g. ~/Downloads/MS)
+        name, cas, inchikey, smiles, formula : identifier (provide one).
+            *inchikey* is the preferred route — it queries NIST directly with no
+            intermediate PubChem call.  *smiles* resolves via PubChem first.
+            Formula search is ambiguous; the first NIST hit with MS data is used.
+        ms_index  : which spectrum to use when multiple are available
+        local_dir : optional extra source directory (e.g. ~/Downloads/MS)
         """
         try:
             import nistchempy as nist
@@ -267,42 +294,95 @@ class MassSpectrum:
         from platformdirs import user_cache_dir
         import shutil
 
-        # Resolve SMILES → CAS via PubChem before hitting NIST
-        if smiles is not None:
-            info = get_compound_info(smiles, "smiles")
-            if not info or not info.get("cas"):
-                raise ValueError(
-                    f"Could not resolve SMILES to a known compound: {smiles!r}"
-                )
-            cas = info["cas"]
+        # Compute InChIKey from SMILES via RDKit (avoids PubChem round-trip)
+        if smiles is not None and inchikey is None:
+            from rgakit.molecule._utils import smiles_to_inchikey
+            inchikey = smiles_to_inchikey(smiles)
+            if inchikey is None:
+                # Fall back to PubChem CAS resolution
+                try:
+                    info = get_compound_info(smiles, "smiles")
+                except Exception as exc:
+                    raise ValueError(
+                        f"PubChem lookup failed for SMILES {smiles!r}: {exc}"
+                    ) from exc
+                if not info:
+                    raise ValueError(f"SMILES not found in PubChem: {smiles!r}")
+                if info.get("cas"):
+                    cas = info["cas"]
+                elif info.get("iupac"):
+                    name = info["iupac"]
+                else:
+                    raise ValueError(
+                        f"PubChem found {smiles!r} but could not resolve CAS or IUPAC name"
+                    )
 
-        if name is not None:
-            results = nist.run_search(name, "name")
-        elif cas is not None:
-            results = nist.run_search(cas, "cas")
-        else:
-            raise ValueError("Provide name, cas, or smiles.")
+        try:
+            if inchikey is not None:
+                results = nist.run_search(inchikey, "inchi")
+            elif name is not None:
+                results = nist.run_search(name, "name")
+            elif cas is not None:
+                results = nist.run_search(cas, "cas")
+            elif formula is not None:
+                results = nist.run_search(formula, "formula")
+            else:
+                raise ValueError("Provide inchikey, name, cas, smiles, or formula.")
+        except Exception as exc:
+            raise ValueError(
+                f"NIST search failed for {inchikey or name or cas or smiles or formula!r}: {exc}"
+            ) from exc
 
         if not results.compounds:
-            raise ValueError(f"No compounds found for query: {name or cas or smiles!r}")
+            raise ValueError(
+                f"No NIST entry for: {inchikey or name or cas or smiles or formula!r}"
+            )
 
-        compound = results.compounds[0]
+        # For formula searches, skip to the first compound that actually has MS data
+        if formula is not None and inchikey is None and name is None and cas is None:
+            compound = None
+            for candidate in results.compounds:
+                try:
+                    candidate.get_ms_spectra()
+                    if candidate.ms_specs:
+                        compound = candidate
+                        break
+                except Exception:
+                    continue
+            if compound is None:
+                raise ValueError(
+                    f"No MS spectra found for any isomer of formula {formula!r}"
+                )
+            logger.info(
+                "Formula search %r matched %r (first isomer with MS data) — "
+                "verify this is the intended compound.",
+                formula, compound.name,
+            )
+        else:
+            compound = results.compounds[0]
+
         filename = f"{compound.ID}_MS_{ms_index}.jdx"
 
         cache_dir = Path(user_cache_dir("rgakit")) / "MS"
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_path = cache_dir / filename
 
-        # Enrich with PubChem metadata (SMILES, InChIKey, etc.) — cached on disk
-        pubchem = get_compound_info(compound.cas_rn, "cas") if compound.cas_rn else {}
+        # Enrich metadata — use known inchikey/smiles first, fall back to PubChem
+        pubchem: dict = {}
+        if not inchikey and compound.cas_rn:
+            try:
+                pubchem = get_compound_info(compound.cas_rn, "cas") or {}
+            except Exception:
+                pubchem = {}
 
         metadata = {k: v for k, v in {
-            "nist_id":   compound.ID,
-            "cas":       compound.cas_rn,
-            "formula":   pubchem.get("formula") or compound.formula,
-            "mw":        pubchem.get("mw") or str(compound.mol_weight),
-            "inchi_key": pubchem.get("inchikey") or getattr(compound, "inchi_key", None),
-            "smiles":    pubchem.get("smiles") or (smiles if smiles else None),
+            "nist_id":  compound.ID,
+            "cas":      compound.cas_rn,
+            "formula":  pubchem.get("formula") or compound.formula,
+            "mw":       pubchem.get("mw") or str(compound.mol_weight),
+            "inchikey": inchikey or pubchem.get("inchikey") or getattr(compound, "inchi_key", None),
+            "smiles":   smiles or pubchem.get("smiles"),
+            "source":   "nist",
         }.items() if v}
 
         def _finalise(obj):
@@ -616,7 +696,7 @@ class MassSpectrum:
     # ------------------------------------------------------------------
 
     def cosine_similarity(self, other: "MassSpectrum") -> float:
-        """Dot-product cosine similarity on the shared m/z grid → [0, 1]."""
+        """Dot-product cosine similarity on the shared m/z grid, returns [0, 1]."""
         from .similarity import cosine
         return cosine(self, other)
 

@@ -201,10 +201,12 @@ class SpectraLibrary:
         spectrum_or_mz : MassSpectrum  *or*  array-like of integer m/z values
         intensity      : array-like of intensities (required when the first
                          argument is an m/z array, ignored otherwise)
-        grid           : m/z values to use for fitting. Defaults to the
-                         intersection of the observed m/z and the library's
-                         union grid. A small intersection reduces fit quality;
-                         a warning is issued when fewer than 10 channels overlap.
+        grid           : m/z values to use for fitting. Defaults to all observed
+                         m/z values. Library compounds produce zero contribution
+                         at m/z channels not in their spectrum, so uncovered
+                         channels appear directly in the residual. A warning is
+                         issued when fewer than 10 channels overlap with the
+                         library.
         mz_min         : exclude all m/z channels below this value from the fit
         mz_max         : exclude all m/z channels above this value from the fit
         exclude_mz     : list of specific m/z values to drop (e.g. ``[2]`` to
@@ -239,6 +241,12 @@ class SpectraLibrary:
             mz_obs = np.asarray(spectrum_or_mz, dtype=int)
             y_obs  = np.asarray(intensity, dtype=float)
 
+        # Full-spectrum total (normalized by its own max) computed before any
+        # grid or intensity filtering — so percentages can be expressed as a
+        # fraction of everything the instrument measured, not just the library grid.
+        _norm = float(y_obs.max()) or 1.0
+        obs_total_full = float(np.sum(y_obs)) / _norm
+
         if min_intensity is not None:
             peak = y_obs.max() or 1.0
             keep = y_obs >= min_intensity * peak
@@ -246,7 +254,7 @@ class SpectraLibrary:
             y_obs  = y_obs[keep]
 
         if grid is None:
-            grid = np.intersect1d(mz_obs, self.grid)
+            grid = mz_obs
 
         if mz_min is not None:
             grid = grid[grid >= mz_min]
@@ -256,22 +264,30 @@ class SpectraLibrary:
             grid = grid[~np.isin(grid, exclude_mz)]
 
         if len(grid) == 0:
-            raise ValueError("No m/z overlap between observed spectrum and library.")
+            raise ValueError("Observed spectrum has no m/z channels after filtering.")
 
-        if len(grid) < 10:
-            logger.warning(
-                "Only %d m/z channel(s) overlap between the observed spectrum "
-                "and the library — fit quality may be poor.",
-                len(grid),
-            )
-
-        logger.debug(
-            "Fitting: %d library compounds × %d m/z channels (method=%s)",
-            len(self._spectra), len(grid), method,
-        )
         y     = MassSpectrum(mz_obs, y_obs).on_grid(grid)
         names = self.names()
         A     = np.column_stack([self._spectra[n].on_grid(grid) for n in names])
+
+        # Channels where no library compound has any signal — purely residual.
+        n_covered = int(A.any(axis=1).sum())
+        if n_covered == 0:
+            raise ValueError(
+                "No library compound has peaks at any of the observed m/z channels. "
+                "Check that the library is appropriate for this spectrum."
+            )
+        if n_covered < 10:
+            logger.warning(
+                "%d/%d observed m/z channel(s) are covered by the library — "
+                "fit quality may be poor.",
+                n_covered, len(grid),
+            )
+
+        logger.debug(
+            "Fitting: %d compounds × %d observed channels (%d library-covered, method=%s)",
+            len(self._spectra), len(grid), n_covered, method,
+        )
 
         solve = make_solver(method, alpha)
         weights_arr, residual = solve(A, y)
@@ -303,6 +319,7 @@ class SpectraLibrary:
             grid                   = grid,
             fit_params             = fit_params or None,
             spectral_contributions = spectral_contributions,
+            obs_total_full         = obs_total_full,
         )
 
     def fit_time_series(

@@ -22,7 +22,13 @@ dependencies = [
     "nistchempy",
     "dill",
     "pubchempy",
+    "rdkit",
+    "ase",
+    "networkx",
 ]
+
+[project.optional-dependencies]
+search = ["hnswlib", "gensim>=4.1"]
 
 [project.urls]
 Repository  = "https://github.com/roncofaber/rgakit"
@@ -30,7 +36,7 @@ Repository  = "https://github.com/roncofaber/rgakit"
 Changelog   = "https://github.com/roncofaber/rgakit/releases"
 
 [tool.setuptools]
-packages = ["rgakit"]
+packages = ["rgakit", "rgakit.molecule", "rgakit.databases"]
 
 [tool.setuptools.dynamic]
 version = {attr = "rgakit.__version__"}
