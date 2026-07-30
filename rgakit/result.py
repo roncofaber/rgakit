@@ -27,6 +27,9 @@ class FitResult:
         fit_params:             dict | None                    = None,
         spectral_contributions: dict[str, np.ndarray] | None  = None,
         obs_total_full:         float | None                   = None,
+        residual_spectrum:      np.ndarray | None              = None,
+        condition_number:       float | None                   = None,
+        uncertainties:          dict[str, float] | None        = None,
     ):
         self.weights                = weights
         self.residual               = residual
@@ -41,6 +44,18 @@ class FitResult:
         # a fraction of everything the instrument measured, not just what the
         # library covers.  None for objects loaded from old pickle files.
         self.obs_total_full         = obs_total_full
+        # Per-channel residual vector (observed - fitted) on the fitting grid.
+        # Spikes here indicate peaks unexplained by the library (missing compounds).
+        self.residual_spectrum      = residual_spectrum
+        # Condition number of the design matrix A.  Values above ~1000 mean
+        # near-collinear reference spectra that the solver cannot distinguish.
+        self.condition_number       = condition_number
+        # Per-compound weight uncertainty (std) from bootstrap runs.
+        # None unless lib.fit_bootstrap() was used.
+        self.uncertainties          = uncertainties
+        # Suggested compounds from external database search on the residual.
+        # List of (MassSpectrum, distance) tuples, or None.
+        self.suggestions: list[tuple] | None = None
 
     @property
     def contributions(self) -> dict[str, float]:
@@ -68,14 +83,37 @@ class FitResult:
         ax.set_title(f"Fit  |  residual = {self.residual:.4f}")
         return ax
 
-    def summary(self, threshold: float = 1e-4, bar_width: int = 28, print_output: bool = True) -> str:
+    def plot_residual(self, ax=None, threshold: float = 0.01):
+        """Bar chart of the per-m/z residual (observed − fitted).
+
+        Channels above *threshold* (fraction of base peak) are highlighted in
+        orange — these are peaks unexplained by the library.
+        """
+        import matplotlib.pyplot as plt
+
+        if self.residual_spectrum is None:
+            raise ValueError("No residual_spectrum stored — refit with a current version.")
+
+        if ax is None:
+            _, ax = plt.subplots(figsize=(10, 3))
+
+        r   = self.residual_spectrum
+        thr = threshold * self.observed.max()
+        colors = ["#E65100" if abs(v) > thr else "#78909C" for v in r]
+        ax.bar(self.grid, r, width=0.8, color=colors)
+        ax.axhline(0, color="black", linewidth=0.6)
+        ax.set_xlabel("m/z")
+        ax.set_ylabel("Residual (observed − fitted)")
+        ax.set_title("Fit residual  —  orange = unexplained peaks")
+        return ax
+
+    def summary(self, threshold: float = 1e-4, print_output: bool = True) -> str:
         """
         Return (and optionally print) a formatted table of contributions.
 
         Parameters
         ----------
         threshold    : minimum weight to include a compound
-        bar_width    : width of the in-table bar chart
         print_output : if True (default), also print to stdout
         """
         contribs  = {k: v for k, v in self.contributions.items() if v >= threshold}
@@ -99,39 +137,53 @@ class FitResult:
         contribs  = dict(sorted(contribs.items(), key=lambda kv: pct_map[kv[0]], reverse=True))
 
         total_pct = sum(pct_map.values())
-        max_pct   = max(pct_map.values()) if pct_map else 1.0
 
-        col_name = max((len(n) for n in contribs), default=8)
-        col_name = max(col_name, 8)
+        col_name   = max((len(n) for n in contribs), default=8)
+        col_name   = max(col_name, 8)
+        has_unc    = bool(self.uncertainties)
+        col_weight = 17 if has_unc else 8   # "w.4f±u.4f" = 13 chars, padded to 17
+        col_flag   = 2 if has_unc else 0    # " !" flag slot
 
-        # Row layout: "  " + name(col_name) + "  " + weight(8) + "   " + pct(6) + "   " + bar(bar_width)
-        w_total = 2 + col_name + 2 + 8 + 3 + 6 + 3 + bar_width
+        # Row layout: "  " + name(col_name) + "  " + weight(col_weight) + "   " + pct(6) + flag(col_flag)
+        w_data  = 2 + col_name + 2 + col_weight + 3 + 6 + col_flag
+        cond_str = f"   cond = {self.condition_number:.0f}" if self.condition_number is not None else ""
+        info = f"  Fit result   residual = {self.residual:.4f}   grid = {len(self.grid)} m/z points{cond_str}"
+        w_total = max(w_data, len(info))
 
         div  = "─" * w_total
         hdiv = "═" * w_total
 
+        w_hdr = "Weight ± σ" if has_unc else "Weight"
+
         lines = []
         lines.append(f"╒{hdiv}╕")
-        info = f"  Fit result   residual = {self.residual:.4f}   grid = {len(self.grid)} m/z points"
         lines.append(f"│{info:<{w_total}}│")
         lines.append(f"╞{hdiv}╡")
-        lines.append(f"│{'  ' + 'Compound':<{col_name + 2}}  {'Weight':>8}   {'% obs':>6}   {'':>{bar_width}}│")
+        hdr = f"  {'Compound':<{col_name}}  {w_hdr:>{col_weight}}   {'% obs':>6}{'':>{col_flag}}"
+        lines.append(f"│{hdr:<{w_total}}│")
         lines.append(f"├{div}┤")
 
         for name, w in contribs.items():
-            pct    = pct_map[name]
-            filled = int(round(pct / max_pct * bar_width))
-            bar    = "█" * filled + "░" * (bar_width - filled)
-            lines.append(f"│  {name:<{col_name}}  {w:>8.4f}   {pct:>5.1f}%   {bar}│")
+            pct = pct_map[name]
+            if has_unc and name in self.uncertainties:
+                unc     = self.uncertainties[name]
+                w_str   = f"{w:.4f}±{unc:.4f}"
+                flagged = " !" if unc > w else ""
+            else:
+                w_str   = f"{w:.4f}"
+                flagged = ""
+            row = f"  {name:<{col_name}}  {w_str:>{col_weight}}   {pct:>5.1f}%{flagged:<{col_flag}}"
+            lines.append(f"│{row:<{w_total}}│")
 
         lines.append(f"├{div}┤")
-        footer = f"  {'Total':<{col_name}}  {'':>8}   {total_pct:>5.1f}%"
+        footer = f"  {'Total':<{col_name}}  {'':>{col_weight}}   {total_pct:>5.1f}%"
         lines.append(f"│{footer:<{w_total}}│")
         lines.append(f"╘{hdiv}╛")
 
         output = "\n".join(lines)
         if print_output:
             print(output)
+            return None   # suppress repr display in IPython/Spyder
         return output
 
     def save(self, path: str) -> None:

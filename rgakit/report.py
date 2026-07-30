@@ -138,12 +138,17 @@ _PAGE_CSS = """
     --clr-good:      #2ca02c;
     --clr-warn:      #d4a700;
     --clr-bad:       #d62728;
+    --clr-bg:        #f5f5f5;
+    --clr-surface:   #fff;
+    --clr-hover:     #f0f4ff;
+    --clr-stripe:    #f8f8f8;
+    --clr-nav-text:  #555;
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
     font-family: Arial, Helvetica, sans-serif;
-    background: #f5f5f5;
+    background: var(--clr-bg);
     margin: 0;
     padding: 0;
     color: var(--clr-text);
@@ -152,7 +157,7 @@ body {
 /* Sticky navigation */
 .rgakit-nav {
     position: sticky; top: 0; z-index: 200;
-    background: #fff; border-bottom: 1px solid #e8e8e8;
+    background: var(--clr-surface); border-bottom: 1px solid #e8e8e8;
     padding: 0 32px;
     display: flex; align-items: center; gap: 0;
     box-shadow: 0 1px 4px rgba(0,0,0,.07);
@@ -160,7 +165,7 @@ body {
 }
 .rgakit-nav > a {
     display: inline-block; padding: 11px 16px;
-    font-size: 0.82em; color: #555; text-decoration: none;
+    font-size: 0.82em; color: var(--clr-nav-text); text-decoration: none;
     border-bottom: 2px solid transparent;
     transition: color 0.15s, border-color 0.15s;
 }
@@ -172,7 +177,7 @@ body {
     flex-shrink: 0;
     display: flex; flex-direction: column; align-items: flex-start;
     padding: 5px 10px 5px 14px;
-    text-decoration: none; color: #555;
+    text-decoration: none; color: var(--clr-nav-text);
     border-left: 1px solid #eee;
     transition: color 0.15s;
 }
@@ -223,7 +228,7 @@ body {
 
 /* Compact metrics card */
 .header-card {
-    background: #fff;
+    background: var(--clr-surface);
     border-radius: 8px;
     box-shadow: 0 1px 5px rgba(0,0,0,.10);
     padding: 14px 24px 12px;
@@ -238,11 +243,6 @@ body {
 .hmetric:last-child { border-right: none; }
 .hmetric-val { display: block; font-size: 1.45em; font-weight: 700; color: var(--clr-primary); line-height: 1.15; }
 .hmetric-lbl { display: block; font-size: 0.65em; color: #aaa; text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
-.meta-badge {
-    background: #eef2fb; border-radius: 20px; padding: 2px 10px;
-    font-size: 0.78em; color: #555;
-}
-.meta-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 8px 0 4px; }
 .fit-info-table { border-collapse: collapse; margin: 8px auto 0; font-size: 0.78em; }
 .fit-info-table td { padding: 2px 10px 2px 6px; }
 .fit-info-table .fik { color: #aaa; text-align: right; white-space: nowrap; padding-right: 6px; }
@@ -251,7 +251,7 @@ body {
 /* Unexplained peaks table */
 .unexp-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
 .unexp-table th { background: #f8f8f8; text-align: left; padding: 6px 12px;
-    border-bottom: 2px solid #e0e0e0; font-weight: 600; color: #555; white-space: nowrap; }
+    border-bottom: 2px solid #e0e0e0; font-weight: 600; color: var(--clr-nav-text); white-space: nowrap; }
 .unexp-table td { padding: 6px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
 .unexp-table tr:hover td { background: #fafafa; }
 .unexp-mz  { font-weight: bold; font-size: 14px; font-family: monospace; }
@@ -300,13 +300,13 @@ body {
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* Detected compound cards */
-.detected-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.detected-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
 .detected-card {
-    width: 140px; border: 1px solid #e5e5e5; border-top-width: 3px;
-    border-radius: 6px; padding: 8px; text-align: center; cursor: default;
-    background: #fff; transition: box-shadow 0.15s;
+    position: relative;
+    border: 1px solid #e5e5e5; border-radius: 6px;
+    padding: 8px; text-align: center; cursor: pointer;
+    background: var(--clr-surface); transition: box-shadow 0.15s;
 }
-.detected-card   { cursor: pointer; }
 .undetected-card { cursor: pointer; }
 .detected-card:hover   { box-shadow: 0 2px 10px rgba(0,0,0,.12); }
 .detected-card img { width: 120px; height: 120px; object-fit: contain; display: block; margin: 0 auto; }
@@ -315,11 +315,13 @@ body {
 .detected-card-name { font-size: 11px; color: #444; margin-top: 5px;
     word-break: break-word; line-height: 1.3; font-weight: 600;
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.detected-card-formula { font-size: 10px; color: var(--clr-muted); margin-top: 1px; font-style: italic; }
-.detected-card-pct { font-size: 13px; font-weight: bold; margin-top: 2px; }
+.detected-card-pct {
+    position: absolute; top: 4px; right: 6px;
+    font-size: 11px; font-weight: 700; color: var(--clr-primary);
+}
 
 .section {
-    background: #fff;
+    background: var(--clr-surface);
     border-radius: 8px;
     box-shadow: 0 1px 4px rgba(0,0,0,.12);
     padding: 20px 24px;
@@ -353,7 +355,7 @@ body {
 .stacked-plot-col { flex: 1 1 0; min-width: 0; }
 .stacked-legend-col { width: 260px; flex-shrink: 0; }
 .stacked-legend-header {
-    font-size: 0.8em; font-weight: bold; color: #555;
+    font-size: 0.8em; font-weight: bold; color: var(--clr-nav-text);
     padding: 6px 8px 6px; border-bottom: 1px solid #eee;
 }
 .stacked-legend-hint { font-weight: normal; color: #aaa; }
@@ -379,6 +381,58 @@ body {
 .legend-label { flex: 1; white-space: normal; word-break: break-word; line-height: 1.3; }
 .legend-pct { color: #999; font-size: 0.88em; flex-shrink: 0; padding-top: 1px; }
 
+
+.compound-card {
+    display:flex; align-items:center; gap:20px;
+    padding:16px 20px; margin:0 auto 16px;
+    max-width:500px;
+    background:var(--clr-surface); border:1px solid var(--clr-border);
+    border-radius:8px;
+}
+.compound-card img { height:120px; }
+.compound-card-info { }
+.compound-card-name { font-weight:700; font-size:1.2em; margin-bottom:4px; color:var(--clr-text); }
+.compound-card-detail { color:var(--clr-muted); font-size:0.88em; line-height:1.6; }
+.suggestion-grid { display:grid; grid-template-columns:repeat(5, 1fr); gap:10px; }
+.suggestion-card {
+    position:relative;
+    background:var(--clr-surface); border:1px solid #e5e5e5;
+    border-radius:6px; padding:8px; text-align:center; cursor:pointer;
+    transition: box-shadow 0.15s;
+}
+.suggestion-card:hover { box-shadow: 0 2px 10px rgba(0,0,0,.12); }
+.suggestion-card img { width:120px; height:120px; object-fit:contain; display:block; margin:0 auto; }
+.suggestion-card-name { font-size:11px; font-weight:600; color:#444; margin-top:5px;
+    word-break:break-word; line-height:1.3;
+    display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.suggestion-card-meta { font-size:10px; color:var(--clr-muted); margin-top:2px; }
+.suggestion-card-cos {
+    position:absolute; top:4px; right:6px;
+    font-size:11px; font-weight:700;
+}
+.coll-warning {
+    background:#fff8e1; border:1px solid #ffe082; border-radius:6px;
+    padding:10px 14px; margin-top:4px; font-size:0.84em;
+}
+.coll-warning-title { font-weight:600; color:#b45309; margin-bottom:6px; }
+.coll-pair {
+    display:inline-flex; align-items:center; gap:6px; margin:2px 4px 2px 0;
+    padding:2px 10px; border-radius:12px; background:#fff0c2; border:1px solid #ffe082;
+    font-size:0.82em; cursor:pointer; color:#92400e;
+}
+.coll-pair:hover { background:#ffe082; }
+/* Modal collinearity section */
+.rgakit-modal-collinear {
+    padding:8px 16px 10px; border-top:1px solid #f0f0f0;
+    font-size:0.81em; color:var(--clr-nav-text); flex-shrink:0;
+}
+.rgakit-modal-collinear-title { font-weight:600; color:#b45309; margin-bottom:5px; }
+.rgakit-modal-coll-pill {
+    display:inline-flex; align-items:center; gap:4px; margin:2px;
+    padding:2px 10px; border-radius:12px; background:#fff8e1;
+    border:1px solid #ffe082; cursor:pointer; color:#92400e;
+}
+.rgakit-modal-coll-pill:hover { background:#ffe082; }
 /* Compound spectrum popup modal */
 .rgakit-modal-overlay {
     display: none; position: fixed; inset: 0;
@@ -387,7 +441,7 @@ body {
 }
 .rgakit-modal-overlay.open { display: flex; }
 .rgakit-modal-box {
-    background: #fff; border-radius: 12px;
+    background: var(--clr-surface); border-radius: 12px;
     width: min(700px, 94vw); max-height: 88vh;
     display: flex; flex-direction: column;
     box-shadow: 0 8px 40px rgba(0,0,0,.28);
@@ -409,9 +463,33 @@ body {
                         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rgakit-modal-formula { font-size: 0.92em; color: #333; margin-bottom: 4px; }
 .rgakit-modal-meta    { font-size: 0.75em; color: #aaa; }
-.rgakit-modal-struct  { width: 90px; height: 90px; object-fit: contain; flex-shrink: 0;
-                        border-radius: 6px; background: #fafafa;
-                        border: 1.5px solid #222; box-sizing: border-box; }
+.rgakit-modal-struct-wrap {
+    flex-shrink: 0; display: flex; align-items: flex-end; gap: 4px;
+}
+.rgakit-modal-struct  {
+    width: 90px; height: 90px; object-fit: contain;
+    border-radius: 6px; background: #fafafa;
+    border: 1.5px solid #222; box-sizing: border-box;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    transform-origin: top right;
+}
+.rgakit-modal-struct-wrap:hover {
+    z-index: 100;
+}
+.rgakit-modal-struct:hover {
+    transform: scale(2.5);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+    position: relative; z-index: 100;
+}
+.rgakit-modal-copy-icon {
+    width: 22px; height: 22px; padding: 3px;
+    border: 1px solid #ddd; border-radius: 4px;
+    background: var(--clr-surface); color: #999;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color 0.15s, border-color 0.15s;
+}
+.rgakit-modal-copy-icon:hover { border-color: #aaa; color: #333; }
 .rgakit-modal-plot-wrap { flex: 1; min-height: 200px; max-height: 340px; padding: 6px 10px 10px; }
 """
 
@@ -564,14 +642,6 @@ def _get_structure(name: str, cas: str | None = None, smiles: str | None = None)
     return svg
 
 
-def _formula_to_html(formula: str) -> str:
-    """Render a plain chemical formula string as HTML with subscript digits.
-
-    E.g. "C2H6O" → "C<sub>2</sub>H<sub>6</sub>O"
-    """
-    import re
-    return re.sub(r"(\d+)", r"<sub>\1</sub>", formula)
-
 
 def _embed_plotly_div(div_id: str, fig_json: str, height: int) -> str:
     """Return HTML that creates a bare div and calls Plotly.newPlot."""
@@ -639,7 +709,7 @@ def _build_pressure_map_section(stack) -> tuple[str, str]:
     toggle_btn = (
         '<button id="rgakit-map-toggle" '
         'style="float:right;margin-bottom:6px;padding:4px 12px;border:1px solid #bbb;'
-        'border-radius:4px;background:#f5f5f5;cursor:pointer;font-size:0.82em;color:#555;">'
+        'border-radius:4px;background:#f5f5f5;cursor:pointer;font-size:0.82em;color:var(--clr-nav-text);">'
         'Show raw data</button>'
         if praw_by_mz is not None else ''
     )
@@ -922,6 +992,8 @@ def generate_report(
     spectrum=None,
     stack=None,
     time_result=None,
+    compound=None,
+    decomposition=None,
     fetch_structures:             bool       = True,
     fetch_undetected_structures:  bool       = True,
     unexplained_threshold:        float      = 0.05,
@@ -962,6 +1034,7 @@ def generate_report(
     -------
     Path to the saved HTML file.
     """
+    import html as _html_mod
     try:
         import plotly.graph_objects as go
         from plotly.offline import get_plotlyjs
@@ -1009,23 +1082,81 @@ def generate_report(
             found = sum(1 for v in structures.values() if v)
             logger.info("Structures: %d/%d rendered successfully.", found, len(all_fetch))
 
-    # Embed reference spectra for the compound popup modal
+    # Collinearity map: {compound_name: [{name, cosine}, ...]} for modal display.
+    # Threshold of 0.97: only flag near-identical spectra.
+    _collinearity_map: dict = {}
+    _collinearity_pairs: list = []   # raw (a, b, cos) list for diagnostics section
+    if library is not None:
+        try:
+            _collinearity_pairs = library.check_collinearity(
+                grid=result.grid, threshold=0.97
+            )
+            for _a, _b, _cos in _collinearity_pairs:
+                _collinearity_map.setdefault(_a, []).append(
+                    {"name": _b, "cosine": round(float(_cos), 3)}
+                )
+                _collinearity_map.setdefault(_b, []).append(
+                    {"name": _a, "cosine": round(float(_cos), 3)}
+                )
+        except Exception:
+            pass
+
+    # Embed reference spectra for the compound popup modal.
+    # Single helper so detected, undetected, and suggested compounds all
+    # populate the same fields consistently.
+    def _spec_entry(sp, svg: str = "", collinear: list | None = None) -> dict:
+        meta = getattr(sp, "metadata", {}) or {}
+        formula = (meta.get("formula") or meta.get("molecular_formula") or "")
+        return {
+            "mz":            sp.mz.tolist(),
+            "intensity":     sp.normalized.tolist(),
+            "formula":       formula,
+            "cas":           meta.get("cas") or "",
+            "mw":            str(meta.get("mw") or meta.get("molecular_weight") or ""),
+            "smiles":        meta.get("smiles") or "",
+            "svg":           svg,
+            "collinear_with": collinear or [],
+        }
+
     _lib_spectra: dict = {}
     if library is not None:
         for _n in names + undetected:
             try:
                 _sp = library[_n]
-                _meta = _sp.metadata
-                _lib_spectra[_n] = {
-                    "mz":        _sp.mz.tolist(),
-                    "intensity": _sp.normalized.tolist(),
-                    "formula":   _meta.get("formula", ""),
-                    "cas":       _meta.get("cas", ""),
-                    "mw":        str(_meta.get("mw", "")),
-                    "svg":       structures.get(_n) or "",
-                }
+                _lib_spectra[_n] = _spec_entry(
+                    _sp,
+                    svg=structures.get(_n) or "",
+                    collinear=_collinearity_map.get(_n, []),
+                )
             except Exception:
                 pass
+
+    _suggestions = getattr(result, "suggestions", None)
+    if _suggestions:
+        for _sug_spec, _sug_dist in _suggestions:
+            _sn = getattr(_sug_spec, "name", "") or ""
+            if _sn and _sn not in _lib_spectra:
+                _sug_smiles = (getattr(_sug_spec, "metadata", {}) or {}).get("smiles") or ""
+                _sug_svg = ""
+                if _sug_smiles:
+                    try:
+                        from rdkit.Chem import MolFromSmiles
+                        from rdkit.Chem.Draw import MolDraw2DSVG
+                        import base64 as _b64
+                        _mol = MolFromSmiles(_sug_smiles)
+                        if _mol is not None:
+                            _dd = MolDraw2DSVG(250, 140)
+                            _dd.drawOptions().clearBackground = False
+                            _dd.DrawMolecule(_mol)
+                            _dd.FinishDrawing()
+                            _sug_svg = (
+                                "data:image/svg+xml;base64,"
+                                + _b64.b64encode(_dd.GetDrawingText().encode()).decode()
+                            )
+                    except Exception:
+                        pass
+                _lib_spectra[_sn] = _spec_entry(_sug_spec, svg=_sug_svg)
+
     _lib_spectra_json = json.dumps(_lib_spectra)
 
     sections: list[tuple[str, str]] = []   # (heading, div_html)
@@ -1033,6 +1164,64 @@ def generate_report(
     # Pressure map + time trace — shown first when a SpectrumStack is provided
     if stack is not None:
         sections.append(_build_pressure_map_section(stack))
+
+    # ------------------------------------------------------------------ #
+    # Fit Diagnostics section (solver cards + collinearity warnings)
+    # ------------------------------------------------------------------ #
+    _cond_val   = getattr(result, "condition_number", None)
+    _cond_color = ("var(--clr-good)" if _cond_val is not None and _cond_val < 100
+                   else "var(--clr-warn)" if _cond_val is not None and _cond_val < 1000
+                   else "var(--clr-bad)")
+    _cond_str   = f"{_cond_val:.0f}" if _cond_val is not None else "—"
+
+    _fp0        = getattr(result, "fit_params", {}) or {}
+    _method_disp = _fp0.get("method", "nnls").upper()
+    _method_details = []
+    if _fp0.get("alpha"):
+        _method_details.append(f"α={_fp0['alpha']}")
+    if _fp0.get("l1_ratio") is not None:
+        _method_details.append(f"L1={_fp0['l1_ratio']}")
+    if _fp0.get("n_trials") and _fp0["n_trials"] > 1:
+        _method_details.append(f"{_fp0['n_trials']} trials")
+    if _method_details:
+        _method_disp += (
+            "<br><small style='font-weight:400;font-size:.65em'>"
+            + ", ".join(_method_details) + "</small>"
+        )
+    _weighted_disp = _fp0.get("weighted", False)
+
+    _n_searched = len(names) + len(undetected)
+
+    # Collinearity warnings among detected compounds only
+    _det_set = set(names)
+    _det_coll = [(a, b, c) for a, b, c in _collinearity_pairs
+                 if a in _det_set and b in _det_set]
+    _coll_block = ""
+    if _det_coll:
+        _pills = "".join(
+            f'<span class="coll-pair" data-coll-spec="{_html_mod.escape(a, quote=True)}">{_html_mod.escape(a)}</span>'
+            f'<span style="color:#aaa;font-size:.8em">\u2194</span>'
+            f'<span class="coll-pair" data-coll-spec="{_html_mod.escape(b, quote=True)}">{_html_mod.escape(b)}</span>'
+            f'<span style="color:#bbb;font-size:.8em;margin:0 6px">cos={c:.2f}</span>'
+            for a, b, c in sorted(_det_coll, key=lambda x: -x[2])
+        )
+        _coll_block = f"""
+<div class="coll-warning">
+  <div class="coll-warning-title">\u26a0 Near-collinear detected compounds \u2014 weights may be unreliable</div>
+  {_pills}
+  <div style="margin-top:6px;color:#92400e;font-size:.8em">
+    Cosine similarity &gt; 0.97 \u2014 click a compound to inspect its reference spectrum.
+  </div>
+</div>
+<script>
+document.querySelectorAll('.coll-pair[data-coll-spec]').forEach(function(el) {{
+  el.addEventListener('click', function() {{
+    if (window.openSpecModal) window.openSpecModal(this.dataset.collSpec);
+  }});
+}});
+</script>"""
+
+    # Diagnostics info is displayed in the header card directly.
 
     # ------------------------------------------------------------------ #
     # Summary metrics
@@ -1212,7 +1401,7 @@ def generate_report(
         sections.append(("Unexplained Peaks", unexp_body))
 
     # ------------------------------------------------------------------ #
-    # Section 3 — Compound contributions: pie chart + card grid
+    # Section 3 — Compound contributions: horizontal bar chart
     # ------------------------------------------------------------------ #
     def _csv_field(s: str) -> str:
         """RFC 4180: quote strings that contain commas, quotes, or newlines."""
@@ -1227,110 +1416,33 @@ def generate_report(
 
     bar_colors = [color_map[n] for n in names]
 
-    fig_pie = go.Figure(go.Pie(
-        labels=names,
-        values=pcts,
-        marker=dict(colors=bar_colors),
-        hole=0.38,
-        texttemplate="%{value:.3g}%",
-        textposition="inside",
-        insidetextorientation="radial",
-        hovertemplate="%{label}<br>%{value:.3g}%<extra></extra>",
+    # Horizontal bar chart — reversed so largest is on top.
+    fig_contrib = go.Figure(go.Bar(
+        y=list(reversed(names)),
+        x=list(reversed(pcts)),
+        orientation="h",
+        marker=dict(color=list(reversed(bar_colors))),
+        text=[f"{p:.1f}%" for p in reversed(pcts)],
+        textposition="outside",
+        hovertemplate="%{y}: %{x:.2f}%<extra></extra>",
     ))
-    fig_pie.update_layout(
-        template="plotly_white",
-        showlegend=True,
-        legend=dict(
-            orientation="v",
-            x=1.01, y=0.5,
-            xanchor="left",
-            yanchor="middle",
-            bgcolor="rgba(255,255,255,0.85)",
-            bordercolor="lightgray",
-            borderwidth=1,
-            font=dict(size=11),
-        ),
-        uniformtext_minsize=9,
-        uniformtext_mode="hide",
-        margin=dict(l=10, r=10, t=20, b=20),
-        height=420,
+    _bar_h = max(280, 28 * len(names) + 60)
+    fig_contrib.update_layout(
+        **_LAYOUT_BASE,
+        xaxis=dict(title="Spectral coverage (%)", fixedrange=True),
+        yaxis=dict(fixedrange=True, automargin=True),
+        margin=dict(l=10, r=60, t=10, b=40),
+        height=_bar_h,
     )
 
     contrib_body = f"""
 <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:4px;">
-  <button id="rgakit-pie-reset" class="rgakit-btn">Reset view</button>
-  <button id="rgakit-pie-csv" class="rgakit-btn-primary">Export CSV</button>
+  <button id="rgakit-contrib-csv" class="rgakit-btn-primary">Export CSV</button>
 </div>
-<div id="rgakit-contribs-pie" style="width:100%;"></div>
+{_embed_plotly_div("rgakit-contribs-bar", _fig_to_json(fig_contrib), _bar_h)}
 <script>
 (function() {{
-  var fig = {_fig_to_json(fig_pie)};
-  var n   = fig.data[0].labels.length;
-  var gd  = document.getElementById('rgakit-contribs-pie');
-
-  function getSlices()   {{ return gd.querySelectorAll('g.slice'); }}
-  function getLegItems() {{ return gd.querySelectorAll('g.legend g.traces'); }}
-
-  function dimSlices(activeIdx) {{
-    getSlices().forEach(function(el, k) {{
-      el.style.transition = 'opacity 0.15s ease';
-      el.style.opacity    = (k === activeIdx) ? '1' : '0.25';
-    }});
-  }}
-  function resetSlices() {{
-    getSlices().forEach(function(el) {{
-      el.style.transition = 'opacity 0.15s ease';
-      el.style.opacity    = '1';
-    }});
-  }}
-  function dimLegend(activeIdx) {{
-    getLegItems().forEach(function(el, k) {{
-      el.style.opacity = (k === activeIdx) ? '1' : '0.3';
-    }});
-  }}
-  function resetLegend() {{
-    getLegItems().forEach(function(el) {{ el.style.opacity = '1'; }});
-  }}
-
-  Plotly.newPlot(gd, fig.data, fig.layout, {{responsive:true}}).then(function() {{
-    var legendEl = gd.querySelector('g.legend');
-    if (!legendEl) return;
-
-    function itemIndex(target) {{
-      var el = target;
-      while (el && el !== legendEl) {{
-        if (el.classList && el.classList.contains('traces')) {{
-          var items = legendEl.querySelectorAll('g.traces');
-          for (var k = 0; k < items.length; k++) {{
-            if (items[k] === el) return k;
-          }}
-        }}
-        el = el.parentElement;
-      }}
-      return -1;
-    }}
-
-    legendEl.addEventListener('mouseover', function(e) {{
-      var i = itemIndex(e.target);
-      if (i < 0 || i >= n) return;
-      dimSlices(i);
-      dimLegend(i);
-    }});
-    legendEl.addEventListener('mouseout', function(e) {{
-      if (!legendEl.contains(e.relatedTarget)) {{
-        resetSlices();
-        resetLegend();
-      }}
-    }});
-  }});
-
-  document.getElementById('rgakit-pie-reset').addEventListener('click', function() {{
-    Plotly.relayout(gd, {{hiddenlabels: []}});
-    resetSlices();
-    resetLegend();
-  }});
-
-  document.getElementById('rgakit-pie-csv').addEventListener('click', function() {{
+  document.getElementById('rgakit-contrib-csv').addEventListener('click', function() {{
     var csv  = {csv_content};
     var blob = new Blob([csv], {{type: 'text/csv'}});
     var url  = URL.createObjectURL(blob);
@@ -1344,9 +1456,63 @@ def generate_report(
     sections.append(("Compound Contributions", contrib_body))
 
     # ------------------------------------------------------------------ #
+    # Compound card (optional: shows the original molecule if provided)
+    # ------------------------------------------------------------------ #
+    _compound_html = ""
+    if compound is not None:
+        _cmpd_name = ""
+        _cmpd_smiles = None
+        _cmpd_formula = ""
+        _cmpd_mw = ""
+        if isinstance(compound, str):
+            _cmpd_smiles = compound
+        else:
+            _cmpd_name    = getattr(compound, "name", "") or ""
+            _cmpd_formula = getattr(compound, "formula", "") or ""
+            _mw           = getattr(compound, "molecular_weight", None)
+            _cmpd_mw      = f"{_mw:.2f} g/mol" if _mw else ""
+            try:
+                _cmpd_smiles = compound.smiles
+            except Exception:
+                pass
+        _cmpd_svg = ""
+        if _cmpd_smiles:
+            try:
+                from rdkit.Chem import MolFromSmiles
+                from rdkit.Chem.Draw import MolDraw2DSVG
+                _m = MolFromSmiles(_cmpd_smiles)
+                if _m is not None:
+                    d = MolDraw2DSVG(360, 180)
+                    d.drawOptions().clearBackground = False
+                    d.DrawMolecule(_m)
+                    d.FinishDrawing()
+                    import base64 as _b64
+                    _cmpd_svg = (
+                        '<img src="data:image/svg+xml;base64,'
+                        + _b64.b64encode(d.GetDrawingText().encode()).decode()
+                        + '">'
+                    )
+            except Exception:
+                pass
+        _details = []
+        if _cmpd_formula:
+            _details.append(_cmpd_formula)
+        if _cmpd_mw:
+            _details.append(_cmpd_mw)
+        if _cmpd_smiles:
+            _details.append(f'<code style="font-size:.85em">{_html_mod.escape(_cmpd_smiles)}</code>')
+        _compound_html = f"""
+<div class="compound-card">
+  {_cmpd_svg}
+  <div class="compound-card-info">
+    <div class="compound-card-name">{_html_mod.escape(_cmpd_name) if _cmpd_name else 'Compound'}</div>
+    <div class="compound-card-detail">{' &middot; '.join(_details)}</div>
+  </div>
+</div>"""
+
+    # ------------------------------------------------------------------ #
     # Section 4 — Compound structures (detected + not detected)
     # ------------------------------------------------------------------ #
-    import html as _html_mod
 
     def _det_card(n: str, pct: float, color: str, formula: str = "") -> str:
         src  = structures.get(n)
@@ -1356,17 +1522,12 @@ def generate_report(
             if src else
             '<div class="detected-card-ph">?</div>'
         )
-        formula_html = (
-            f'<div class="detected-card-formula">{_formula_to_html(formula)}</div>'
-            if formula else ""
-        )
         return (
-            f'<div class="detected-card" style="border-top-color:{color};"'
+            f'<div class="detected-card"'
             f' title="{attr}" data-spec-name="{attr}">'
+            f'<div class="detected-card-pct">{pct:.3g}%</div>'
             f'{inner}'
             f'<div class="detected-card-name">{n}</div>'
-            f'{formula_html}'
-            f'<div class="detected-card-pct" style="color:{color};">{pct:.3g}%</div>'
             f'</div>'
         )
 
@@ -1406,7 +1567,61 @@ def generate_report(
   </div>
 </details>""" if undetected else ""
 
+    # Build suggestion cards (collapsible sub-section)
+    _suggestions = getattr(result, "suggestions", None)
+    _sug_block = ""
+    if _suggestions:
+        def _suggest_card(spec, dist: float) -> str:
+            meta    = getattr(spec, "metadata", {}) or {}
+            smiles  = meta.get("smiles") or ""
+            mw      = meta.get("mw")
+            cos     = 1.0 - dist
+            name    = getattr(spec, "name", "") or smiles or "(unnamed)"
+            cos_clr = "var(--clr-good)" if cos >= 0.8 else "var(--clr-warn)" if cos >= 0.6 else "var(--clr-muted)"
+
+            img_html = ""
+            if smiles:
+                try:
+                    from rdkit.Chem import MolFromSmiles
+                    from rdkit.Chem.Draw import MolDraw2DSVG
+                    import base64 as _b64
+                    _m = MolFromSmiles(smiles)
+                    if _m is not None:
+                        d = MolDraw2DSVG(180, 100)
+                        d.drawOptions().clearBackground = False
+                        d.DrawMolecule(_m)
+                        d.FinishDrawing()
+                        img_html = (
+                            '<img src="data:image/svg+xml;base64,'
+                            + _b64.b64encode(d.GetDrawingText().encode()).decode()
+                            + '">'
+                        )
+                except Exception:
+                    pass
+
+            attr = _html_mod.escape(name, quote=True)
+            return (
+                f'<div class="suggestion-card" data-spec-name="{attr}">'
+                f'<div class="suggestion-card-cos" style="color:{cos_clr}">cos {cos:.2f}</div>'
+                f'{img_html}'
+                f'<div class="suggestion-card-name">{_html_mod.escape(name)}</div>'
+                f'</div>'
+            )
+
+        _sug_cards = "".join(_suggest_card(s, d) for s, d in _suggestions)
+        _sug_block = f"""
+<details class="compound-group">
+  <summary>
+    <span class="compound-group-label">Suggested</span>
+    <span class="compound-group-count">{len(_suggestions)} candidate{"s" if len(_suggestions) != 1 else ""} from residual — click to inspect spectrum</span>
+  </summary>
+  <div class="compound-group-body">
+    <div class="suggestion-grid">{_sug_cards}</div>
+  </div>
+</details>"""
+
     structures_body = f"""
+{_compound_html}
 <details class="compound-group" open>
   <summary>
     <span class="compound-group-label">Detected</span>
@@ -1416,7 +1631,8 @@ def generate_report(
     <div class="detected-grid">{det_cards}</div>
   </div>
 </details>
-{undet_block}"""
+{undet_block}
+{_sug_block}"""
     sections.append(("Compound Structures", structures_body))
 
     # ------------------------------------------------------------------ #
@@ -1524,7 +1740,7 @@ def generate_report(
     </div>
     <div class="stacked-legend-scroll" id="stkLegendScroll">{legend_items_html}<div class="legend-item" style="cursor:default;border-top:1px solid #eee;margin-top:4px;pointer-events:none;">
       <span class="legend-swatch" style="background:transparent;border:1.5px solid #333;box-sizing:border-box;"></span>
-      <span class="legend-label" style="color:#555;">Observed</span>
+      <span class="legend-label" style="color:var(--clr-nav-text);">Observed</span>
     </div></div>
   </div>
 </div>
@@ -1573,7 +1789,8 @@ def generate_report(
     Plotly.restyle(GD, {{ x: newX, y: newY, base: newBase, visible: vis, opacity: ops }}, traceIdx);
     legendScroll.classList.toggle('isolating', SELECTED.size > 0);
     document.querySelectorAll('.legend-item').forEach(function(el, j) {{
-      el.style.opacity = (!inSel || SELECTED.has(j)) ? '1' : '0.35';
+      // j >= n is the "Observed" footer row — always keep it at full opacity
+      el.style.opacity = (j >= n || !inSel || SELECTED.has(j)) ? '1' : '0.35';
     }});
   }}
 
@@ -1583,7 +1800,8 @@ def generate_report(
     for (var i = 0; i < n; i++) ops.push(i === idx ? 1.0 : 0.07);
     Plotly.restyle(GD, {{'opacity': ops}}, traceIdx);
     document.querySelectorAll('.legend-item').forEach(function(el, j) {{
-      el.style.opacity = (j === idx) ? '1' : '0.35';
+      // j >= n is the "Observed" footer row — always keep it at full opacity
+      el.style.opacity = (j >= n || j === idx) ? '1' : '0.35';
     }});
   }}
 
@@ -1633,7 +1851,7 @@ def generate_report(
   function stkFilterLegend(q) {{
     q = q.toLowerCase();
     document.querySelectorAll('.legend-item').forEach(function(el) {{
-      var name = el.getAttribute('data-name').toLowerCase();
+      var name = (el.getAttribute('data-name') || '').toLowerCase();
       el.style.display = name.includes(q) ? '' : 'none';
     }});
   }}
@@ -1655,16 +1873,25 @@ def generate_report(
     # Section 6 — Time-resolved contributions (optional)
     # ------------------------------------------------------------------ #
     if time_result is not None:
-        ts_contribs = time_result.contributions()
-        ts_items    = list(ts_contribs.items())
+        # Use the same compound order as the rest of the report (names,
+        # sorted by spectral coverage %).  Compounds present in the time
+        # series but not in the averaged fit go at the end.
+        _ts_weights = time_result.contributions()
+        _ts_order   = [n for n in names if n in _ts_weights]
+        _ts_extra   = [n for n in _ts_weights if n not in set(names)]
+        ts_items    = [(n, _ts_weights[n]) for n in _ts_order + _ts_extra]
         if top_n is not None:
             ts_items = ts_items[:top_n]
 
-        ts_color_map = _make_color_map([n for n, _ in ts_items])
+        # Reuse the bar/stacked palette so each compound keeps the same colour
+        # across all sections; only assign a new colour for compounds that appear
+        # in the time series but not in the averaged fit.
+        ts_color_map = {n: color_map.get(n, p)
+                        for n, p in _make_color_map([n for n, _ in ts_items]).items()}
 
         # Scale each compound's weight by its spectral area on the fit grid so
         # that relative percentages match the spectral-coverage definition used
-        # in the pie chart (sum(ref_on_grid * weight) / sum(observed)).
+        # in the bar chart (sum(ref_on_grid * weight) / sum(observed)).
         ts_areas: dict[str, float] = {}
         if library is not None:
             for name, _ in ts_items:
@@ -1677,21 +1904,44 @@ def generate_report(
                 ts_areas[name] = 1.0
 
         weighted = {name: w * ts_areas[name] for name, w in ts_items}
-        total_w  = sum(weighted.values())
-        safe_total = np.where(total_w > 0, total_w, 1.0)
+
+        # Convert NNLS weights to absolute pressure units.
+        # fit_time_series normalises each scan by its max intensity, so the
+        # correct back-conversion is:
+        #     partial_pressure_j(t) = w_j(t) × area_j × max_per_scan(t)
+        # where max_per_scan(t) is the maximum raw intensity on the fit grid
+        # at time t.  Using stack.pressure.sum() instead would inflate values
+        # because the weights are relative to the max, not the sum.
+        if stack is not None:
+            _mz_idx      = np.array([np.searchsorted(stack.mz, m) for m in time_result.grid])
+            _mz_idx      = _mz_idx[_mz_idx < len(stack.mz)]
+            max_per_scan = stack.pressure[:, _mz_idx].max(axis=1)  # (n_times,)
+            if len(max_per_scan) != len(time_result.time):
+                max_per_scan = np.interp(
+                    time_result.time, stack.time, max_per_scan
+                )
+            scale       = max_per_scan
+            yaxis_title = "Partial pressure (a.u.)"
+            hover_fmt   = "%{y:.3e}"
+        else:
+            total_w    = sum(weighted.values())
+            safe_total = np.where(total_w > 0, total_w, 1.0)
+            scale       = 100.0 / safe_total
+            yaxis_title = "Relative composition (%)"
+            hover_fmt   = "%{y:.1f}%"
 
         fig_ts = go.Figure()
         for name, w in ts_items:
             color = ts_color_map[name]
-            pct   = 100.0 * weighted[name] / safe_total
+            y_vals = weighted[name] * scale
             fig_ts.add_trace(go.Scatter(
-                x=time_result.time, y=pct,
+                x=time_result.time, y=y_vals,
                 name=name,
                 mode="lines",
                 stackgroup="one",
                 fillcolor=color,
                 line=dict(color=color, width=0.5),
-                hovertemplate=f"{name}: %{{y:.1f}}%<extra></extra>",
+                hovertemplate=f"{name}: {hover_fmt}<extra></extra>",
             ))
         # Shutter markers (reuse stack open/close times if available)
         ts_shapes = []
@@ -1709,26 +1959,101 @@ def generate_report(
             **_LAYOUT_BASE,
             hovermode="x unified",
             xaxis_title="Time (s)",
-            yaxis=dict(title="Relative composition (%, normalized)", range=[0, 100]),
+            yaxis=dict(title=yaxis_title),
             height=_SPECTRUM_PLOT_HEIGHT,
             margin=dict(l=60, r=40, t=30, b=50),
             shapes=ts_shapes,
         )
-        ts_note = (
-            '<p style="font-size:12px;color:#aaa;margin:0 0 8px;">'
-            'Each compound\'s NNLS weight is scaled by its spectral area (Σ reference intensity on the fit grid), '
-            'then normalized to 100% at each time point to show relative composition. '
-            'Dashed red lines mark beam-on / beam-off events.'
-            '</p>'
-            if ts_shapes else
-            '<p style="font-size:12px;color:#aaa;margin:0 0 8px;">'
-            'Each compound\'s NNLS weight is scaled by its spectral area (Σ reference intensity on the fit grid), '
-            'then normalized to 100% at each time point to show relative composition.</p>'
+        ts_note_body = (
+            'Each compound\'s NNLS weight is converted to partial pressure by '
+            'multiplying by its spectral area and the per-scan normalisation factor '
+            '(max intensity on the fit grid). '
+            + ('Dashed red lines mark beam-on / beam-off events.' if ts_shapes else '')
         )
+        ts_note = f'<p style="font-size:12px;color:#aaa;margin:0 0 8px;">{ts_note_body}</p>'
         sections.append((
             "Time-Resolved Composition",
             ts_note + _embed_plotly_div("rgakit-timeseries", _fig_to_json(fig_ts), _SPECTRUM_PLOT_HEIGHT),
         ))
+
+    # ------------------------------------------------------------------ #
+    # Section 7 — NMF Decomposition (optional)
+    # ------------------------------------------------------------------ #
+    if decomposition is not None:
+        nmf_r = decomposition
+        # Time-profile line plot
+        fig_nmf = go.Figure()
+        for i in range(nmf_r.n_components):
+            comp  = nmf_r.components[i]
+            pct   = 100 * nmf_r.explained[i]
+            label = comp.name
+            if nmf_r.matches and nmf_r.matches[i]:
+                best = nmf_r.matches[i][0]
+                label = f"{best[0]} (cos={best[1]:.2f})"
+            fig_nmf.add_trace(go.Scatter(
+                x=nmf_r.time, y=nmf_r.profiles[:, i],
+                name=f"{label} [{pct:.1f}%]",
+                mode="lines", line=dict(width=1.5),
+            ))
+
+        _nmf_shapes = []
+        if stack is not None:
+            shutter_lk = dict(color="red", width=1.5, dash="dash")
+            try:
+                open_t, close_t = stack.open_window
+                if open_t is not None:
+                    _nmf_shapes.append(dict(type="line", x0=open_t, x1=open_t,
+                                            y0=0, y1=1, yref="paper", line=shutter_lk))
+                if close_t is not None:
+                    _nmf_shapes.append(dict(type="line", x0=close_t, x1=close_t,
+                                            y0=0, y1=1, yref="paper", line=shutter_lk))
+            except Exception:
+                pass
+
+        fig_nmf.update_layout(
+            **_LAYOUT_BASE,
+            hovermode="x unified",
+            xaxis_title="Time (s)",
+            yaxis=dict(title="Component intensity (a.u.)"),
+            height=_SPECTRUM_PLOT_HEIGHT,
+            margin=dict(l=60, r=40, t=30, b=50),
+            shapes=_nmf_shapes,
+        )
+
+        # Component summary table
+        _nmf_rows = ""
+        for i in range(nmf_r.n_components):
+            comp = nmf_r.components[i]
+            pct  = 100 * nmf_r.explained[i]
+            match_str = ""
+            if nmf_r.matches and nmf_r.matches[i]:
+                best = nmf_r.matches[i][0]
+                match_str = f'{_html_mod.escape(best[0])} <span style="color:var(--clr-muted)">(cos={best[1]:.2f})</span>'
+            _nmf_rows += (
+                f'<tr>'
+                f'<td style="text-align:center;font-weight:600">{i+1}</td>'
+                f'<td style="text-align:right">{pct:.1f}%</td>'
+                f'<td>{match_str or "<span style=\"color:#ccc\">no match</span>"}</td>'
+                f'</tr>'
+            )
+
+        nmf_body = f"""
+<p style="font-size:0.85em;color:var(--clr-muted);margin:0 0 10px;">
+  Non-negative Matrix Factorisation (NMF) decomposes the time × m/z pressure
+  matrix into independent components without using a reference library.
+  Each component's resolved spectrum is matched against the database for
+  identification.  Reconstruction error: {nmf_r.reconstruction_error:.4f}.
+</p>
+{_embed_plotly_div("rgakit-nmf-profiles", _fig_to_json(fig_nmf), _SPECTRUM_PLOT_HEIGHT)}
+<table class="fit-info-table" style="margin-top:12px;width:100%;">
+  <thead><tr>
+    <th style="text-align:center;padding:4px 10px;">#</th>
+    <th style="text-align:right;padding:4px 10px;">Signal</th>
+    <th style="padding:4px 10px;">Best database match</th>
+  </tr></thead>
+  <tbody>{_nmf_rows}</tbody>
+</table>"""
+        sections.append(("NMF Decomposition", nmf_body))
 
     # ------------------------------------------------------------------ #
     # Assemble HTML page
@@ -1756,12 +2081,8 @@ def generate_report(
         if meta.get("background_correct"):
             _fit_info_pairs.append(("Background", "corrected"))
 
+    # Only show filter params here; solver/condition/library are in the header metrics.
     fp = getattr(result, "fit_params", {}) or {}
-    if "method" in fp:
-        method_label = fp["method"].upper()
-        if fp.get("method") == "lasso" and "alpha" in fp:
-            method_label += f" (α={fp['alpha']})"
-        _fit_info_pairs.append(("Method", method_label))
     if "mz_min" in fp:
         _fit_info_pairs.append(("m/z min", str(fp["mz_min"])))
     if "mz_max" in fp:
@@ -1805,15 +2126,24 @@ def generate_report(
       <span class="hmetric-val" style="color:{cov_color};">{coverage:.1f}%</span>
       <span class="hmetric-lbl">Signal Coverage</span>
     </div>
-    <div class="hmetric" title="Number of library compounds with contributions above the detection threshold.">
-      <span class="hmetric-val">{len(contribs)}</span>
+    <div class="hmetric" title="Number of library compounds detected (above threshold) vs. total searched.">
+      <span class="hmetric-val">{len(contribs)}<span style="font-weight:400;font-size:.65em;color:#999"> / {_n_searched}</span></span>
       <span class="hmetric-lbl">Compounds</span>
     </div>
-    <div class="hmetric" title="Number of m/z channels included in the fit grid (union of all library spectra).">
+    <div class="hmetric" title="Number of m/z channels included in the fit grid.">
       <span class="hmetric-val">{len(result.grid)}</span>
-      <span class="hmetric-lbl">m/z points</span>
+      <span class="hmetric-lbl">m/z Grid</span>
+    </div>
+    <div class="hmetric" title="Fitting solver used. OMP = orthogonal matching pursuit (sparse); NNLS = non-negative least squares; LASSO = L1-regularised.">
+      <span class="hmetric-val">{_method_disp}</span>
+      <span class="hmetric-lbl">Solver</span>
+    </div>
+    <div class="hmetric" title="Condition number of the design matrix. High values (&gt; 1000) indicate near-collinear reference spectra that the solver cannot reliably distinguish.">
+      <span class="hmetric-val" style="color:{_cond_color};">{_cond_str}</span>
+      <span class="hmetric-lbl">Condition №</span>
     </div>
   </div>
+  {_coll_block}
   {fit_summary_html}
 </div>"""
 
@@ -1926,23 +2256,36 @@ def generate_report(
         <div class="rgakit-modal-info">
           <div id="rgakit-modal-name"    class="rgakit-modal-name"></div>
           <div id="rgakit-modal-formula" class="rgakit-modal-formula"></div>
-          <div id="rgakit-modal-meta"    class="rgakit-modal-meta"></div>
+          <div id="rgakit-modal-meta" class="rgakit-modal-meta"></div>
         </div>
-        <img id="rgakit-modal-struct" class="rgakit-modal-struct" src="" alt="" style="display:none;">
+        <div id="rgakit-modal-struct-wrap" class="rgakit-modal-struct-wrap" style="display:none;">
+          <button id="rgakit-modal-copy-img" class="rgakit-modal-copy-icon" title="Copy structure to clipboard">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6zM2 5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-1h1v1a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1v1H2z"/></svg>
+          </button>
+          <img id="rgakit-modal-struct" class="rgakit-modal-struct" src="" alt="">
+        </div>
         <button class="rgakit-modal-close" id="rgakit-modal-close" aria-label="Close">&times;</button>
       </div>
       <div class="rgakit-modal-plot-wrap">
         <div id="rgakit-modal-plot" style="width:100%;height:100%;"></div>
       </div>
+      <div id="rgakit-modal-collinear" class="rgakit-modal-collinear" style="display:none;">
+        <div class="rgakit-modal-collinear-title">⚠ Similar library spectra — may alias with this compound</div>
+        <div id="rgakit-modal-coll-list"></div>
+      </div>
     </div>
   </div>
   <script>
   (function() {{
-    var SPECS   = {_lib_spectra_json};
-    var modal   = document.getElementById('rgakit-spec-modal');
-    var plotEl  = document.getElementById('rgakit-modal-plot');
+    var SPECS    = {_lib_spectra_json};
+    var modal    = document.getElementById('rgakit-spec-modal');
+    var plotEl   = document.getElementById('rgakit-modal-plot');
     var structEl = document.getElementById('rgakit-modal-struct');
-    var rendered = false;
+    var collDiv  = document.getElementById('rgakit-modal-collinear');
+    var collList = document.getElementById('rgakit-modal-coll-list');
+    var structWrap = document.getElementById('rgakit-modal-struct-wrap');
+    var copyImg    = document.getElementById('rgakit-modal-copy-img');
+    var rendered   = false;
 
     function formulaToHtml(f) {{
       return f.replace(/(\\d+)/g, '<sub>$1</sub>');
@@ -1957,19 +2300,41 @@ def generate_report(
         spec.formula ? formulaToHtml(spec.formula) : '';
 
       var parts = [];
-      if (spec.cas) parts.push('CAS\u00a0' + spec.cas);
-      if (spec.mw)  parts.push('MW\u00a0'  + spec.mw);
+      if (spec.cas)    parts.push('CAS\u00a0' + spec.cas);
+      if (spec.mw)     parts.push('MW\u00a0'  + spec.mw);
+      if (spec.smiles) parts.push(spec.smiles);
       document.getElementById('rgakit-modal-meta').textContent =
         parts.join('\u2002\u00b7\u2002');
 
       if (spec.svg) {{
         structEl.src = spec.svg;
-        structEl.style.display = 'block';
+        structWrap.style.display = '';
       }} else {{
-        structEl.style.display = 'none';
+        structWrap.style.display = 'none';
       }}
 
-      var plotHeight = Math.max(200,
+      // Collinearity section
+      var coll = spec.collinear_with || [];
+      if (coll.length > 0) {{
+        collList.innerHTML = coll
+          .sort(function(a,b){{ return b.cosine - a.cosine; }})
+          .map(function(c) {{
+            return '<span class="rgakit-modal-coll-pill" data-coll-name="' +
+                   c.name.replace(/"/g, '&quot;') + '">' +
+                   c.name + ' <span style="opacity:.55;font-size:.88em">cos\u2009=\u2009' +
+                   c.cosine.toFixed(2) + '</span></span>';
+          }}).join(' ');
+        collList.querySelectorAll('[data-coll-name]').forEach(function(el) {{
+          el.addEventListener('click', function() {{
+            openSpecModal(this.dataset.collName);
+          }});
+        }});
+        collDiv.style.display = '';
+      }} else {{
+        collDiv.style.display = 'none';
+      }}
+
+      var plotHeight = Math.max(180,
         document.querySelector('.rgakit-modal-plot-wrap').clientHeight - 16);
       var trace = {{
         type: 'bar',
@@ -2015,6 +2380,32 @@ def generate_report(
         openSpecModal(this.dataset.specName);
       }});
     }});
+
+    // Expose globally so inline onclick handlers (collinearity pills, etc.) can call it
+    copyImg.addEventListener('click', function(e) {{
+      e.stopPropagation();
+      var src = structEl.src;
+      if (!src) return;
+      var img = new Image();
+      img.onload = function() {{
+        var canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth * 2;
+        canvas.height = img.naturalHeight * 2;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(function(blob) {{
+          navigator.clipboard.write([new ClipboardItem({{'image/png': blob}})]).then(function() {{
+            copyImg.style.color = 'var(--clr-good)';
+            setTimeout(function() {{ copyImg.style.color = ''; }}, 1500);
+          }});
+        }}, 'image/png');
+      }};
+      img.src = src;
+    }});
+
+    window.openSpecModal = openSpecModal;
   }})();
   </script>
 </body>

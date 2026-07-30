@@ -12,158 +12,9 @@ from pathlib import Path
 import numpy as np
 
 from .nomenclature import normalize_nist_name, resolve_name, get_compound_info
+from .io import parse_jdx, generate_jdx, RGA_META_KEYS, parse_msp_blocks
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# JCAMP-DX parsing helpers
-# ---------------------------------------------------------------------------
-
-_PEAK_TABLE_RE = re.compile(
-    r"##PEAK TABLE=\(XY\.\.XY\)(.*?)##END=", re.DOTALL | re.IGNORECASE
-)
-_PAIR_RE    = re.compile(r"(\d+),(\d+)")
-_JDX_FIELDS = {
-    "name":    re.compile(r"##TITLE[^\S\r\n]*=[^\S\r\n]*(.+)",           re.IGNORECASE),
-    "cas":     re.compile(r"##CAS REGISTRY NO[^\S\r\n]*=[^\S\r\n]*(.+)", re.IGNORECASE),
-    "formula": re.compile(r"##MOLFORM[^\S\r\n]*=[^\S\r\n]*(.+)",         re.IGNORECASE),
-    "mw":      re.compile(r"##MW[^\S\r\n]*=[^\S\r\n]*(.+)",              re.IGNORECASE),
-}
-# User-defined fields written by rgakit (##$KEY=value)
-_USER_FIELD_RE = re.compile(r"^##\$([^=]+)=(.+)", re.MULTILINE)
-
-
-
-def _try_cast(value: str):
-    """Try to convert a string to int or float; return the string if neither works."""
-    try:
-        return int(value)
-    except ValueError:
-        pass
-    try:
-        return float(value)
-    except ValueError:
-        pass
-    if value.lower() == "true":
-        return True
-    if value.lower() == "false":
-        return False
-    return value
-
-
-def _parse_jdx(jdx_text: str) -> tuple[np.ndarray, np.ndarray, dict]:
-    metadata = {}
-    for key, pattern in _JDX_FIELDS.items():
-        m = pattern.search(jdx_text)
-        if m:
-            metadata[key] = m.group(1).strip()
-
-    # Recover any rgakit user-defined fields (##$KEY=value)
-    for m in _USER_FIELD_RE.finditer(jdx_text):
-        metadata[m.group(1).strip()] = _try_cast(m.group(2).strip())
-
-    match = _PEAK_TABLE_RE.search(jdx_text)
-    if not match:
-        raise ValueError("No PEAK TABLE found in JCAMP-DX text.")
-
-    pairs = _PAIR_RE.findall(match.group(1))
-    if not pairs:
-        raise ValueError("Peak table is empty.")
-
-    mz        = np.array([int(m)   for m, _ in pairs], dtype=int)
-    intensity = np.array([float(i) for _, i in pairs], dtype=float)
-    return mz, intensity, metadata
-
-
-# ---------------------------------------------------------------------------
-# MSP parsing helpers
-# ---------------------------------------------------------------------------
-
-# NIST MSP field names mapped to internal metadata keys
-_MSP_FIELD_MAP = {
-    "name":     "name",
-    "cas#":     "cas",
-    "cas":      "cas",
-    "formula":  "formula",
-    "mw":       "mw",
-    "exactmass":"exactmass",
-    "nist#":    "nist_id",
-    "db#":      "nist_id",
-    "comments": "comments",
-    "inchikey": "inchi_key",
-}
-
-_MSP_NUM_PEAKS_RE = re.compile(r"^num\s*peaks?\s*[:=]\s*(\d+)", re.IGNORECASE)
-_MSP_FIELD_RE     = re.compile(r"^([^:]+?)\s*:\s*(.+)$")
-
-
-def _parse_msp_blocks(text: str) -> list[dict]:
-    """
-    Split MSP text into individual spectrum dicts.
-
-    Each dict has keys ``mz``, ``intensity`` (np.ndarray) and any metadata
-    fields present in the block (``name``, ``cas``, ``formula``, ``mw``, …).
-    """
-    # Entries are separated by one or more blank lines
-    raw_blocks = re.split(r"\n{2,}", text.strip())
-    results = []
-
-    for block in raw_blocks:
-        if not block.strip():
-            continue
-        lines      = block.splitlines()
-        metadata   = {}
-        mz_list:   list[int]   = []
-        int_list:  list[float] = []
-        in_peaks   = False
-        n_expected = 0
-
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-
-            if in_peaks:
-                # Peaks: multiple "mz intensity" pairs per line, space/tab separated
-                tokens = line.split()
-                # pairs of (mz, intensity)
-                for k in range(0, len(tokens) - 1, 2):
-                    try:
-                        mz_list.append(int(tokens[k]))
-                        int_list.append(float(tokens[k + 1]))
-                    except (ValueError, IndexError):
-                        break
-                continue
-
-            m_np = _MSP_NUM_PEAKS_RE.match(line)
-            if m_np:
-                n_expected = int(m_np.group(1))
-                in_peaks   = True
-                continue
-
-            m_f = _MSP_FIELD_RE.match(line)
-            if m_f:
-                key = m_f.group(1).strip().lower()
-                val = m_f.group(2).strip()
-                internal_key = _MSP_FIELD_MAP.get(key, key)
-                metadata[internal_key] = _try_cast(val)
-
-        if not mz_list:
-            block_name = metadata.get("name", "<unnamed>")
-            logger.warning("MSP block %r has no peaks - skipped.", block_name)
-            continue
-
-        mz        = np.array(mz_list, dtype=int)
-        intensity = np.array(int_list, dtype=float)
-        order     = np.argsort(mz)
-        results.append({
-            **metadata,
-            "mz":        mz[order],
-            "intensity": intensity[order],
-        })
-
-    return results
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +98,7 @@ class MassSpectrum:
     @classmethod
     def from_jdx(cls, jdx_text: str, name: str = "") -> "MassSpectrum":
         """Parse a JCAMP-DX string (e.g. nistchempy's ms_specs[0].jdx_text)."""
-        mz, intensity, metadata = _parse_jdx(jdx_text)
+        mz, intensity, metadata = parse_jdx(jdx_text)
         cas           = metadata.get("cas", "")
         resolved_name = resolve_name(cas=cas, nist_name=name or metadata.get("name", ""))
         return cls(mz, intensity, name=resolved_name, metadata=metadata, jdx_text=jdx_text)
@@ -296,7 +147,7 @@ class MassSpectrum:
 
         # Compute InChIKey from SMILES via RDKit (avoids PubChem round-trip)
         if smiles is not None and inchikey is None:
-            from rgakit.molecule._utils import smiles_to_inchikey
+            from rgakit.molecule.utils import smiles_to_inchikey
             inchikey = smiles_to_inchikey(smiles)
             if inchikey is None:
                 # Fall back to PubChem CAS resolution
@@ -477,7 +328,7 @@ class MassSpectrum:
         text  : full content of an MSP file (may contain multiple entries)
         index : which entry to return (0-based)
         """
-        blocks = _parse_msp_blocks(text)
+        blocks = parse_msp_blocks(text)
         if not blocks:
             raise ValueError("No spectra found in MSP text.")
         if index >= len(blocks):
@@ -501,7 +352,7 @@ class MassSpectrum:
     def all_from_msp_file(cls, path: str | Path) -> list["MassSpectrum"]:
         """Load every spectrum in an MSP file and return them as a list."""
         text   = Path(path).read_text()
-        blocks = _parse_msp_blocks(text)
+        blocks = parse_msp_blocks(text)
         spectra = []
         for block in blocks:
             mz        = block.pop("mz")
@@ -525,9 +376,8 @@ class MassSpectrum:
                 f.write(f"{mz}\t{inten}\n")
         return dest
 
-    # Fields stored as rgakit user-defined JDX labels (##$KEY=value)
-    _RGA_META_KEYS = ("sample_name", "x", "y", "pd_ua", "n_open_scans",
-                      "background_correct", "scan_settings")
+    # RGA-specific metadata keys preserved in JDX round-trips (defined in io.jdx)
+    _RGA_META_KEYS = RGA_META_KEYS
 
     def _generate_jdx(self) -> str:
         """Generate a JCAMP-DX string from the stored mz/intensity arrays."""

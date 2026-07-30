@@ -35,7 +35,7 @@ _PROTON_MASS = 1.007276466621
 # ASE viewer helper
 # ---------------------------------------------------------------------------
 
-def _view(atoms_or_list, traj_path: str | None = None):
+def view(atoms_or_list, traj_path: str | None = None):
     """
     Open atoms or a trajectory in the ASE GUI, working correctly inside
     Spyder / IPython kernels.
@@ -78,28 +78,29 @@ def _view(atoms_or_list, traj_path: str | None = None):
 # Molecule loading helpers
 # ---------------------------------------------------------------------------
 
-from ._load import (
-    load_rdkit_mol, _embed_fragment,
+from .load import (
+    load_rdkit_mol, embed_fragment,
 )
-from ._utils import (
+from .utils import (
     rdkit_to_ase,
     smiles_to_inchikey,
-    _monoisotopic_from_smiles, _formal_charge_from_smiles,
-    _adjacency, _is_connected,
-    _canonical_smiles_radical,
-    atoms_to_graph, _extract_components,
+    monoisotopic_from_smiles, formal_charge_from_smiles,
+    adjacency, is_connected,
+    canonical_smiles_radical,
+    atoms_to_graph, extract_components,
 )
 
 
-# Graph helpers, SMILES utilities, and format conversions all live in _utils.
+# Graph helpers, SMILES utilities, and format conversions all live in utils.
 
 
-from ._smiles import (
-    _hcap_smiles, _deprotonate_smiles, _anion_to_radical, _combine_radicals,
+from .smiles import (
+    hcap_smiles, deprotonate_smiles, anion_to_radical, combine_radicals,
+    beta_scission_products, h_migration_products, alpha_dehydrogenation_products,
 )
 
 
-def _is_labile(bond) -> bool:
+def is_labile(bond) -> bool:
     """
     Return True if *bond* (an RDKit Bond) is a valid primary cut site under EI.
 
@@ -115,7 +116,7 @@ def _is_labile(bond) -> bool:
     return True
 
 
-def _add_fragment(
+def add_fragment(
     smi:        str | None,
     parent_idx: tuple[int, ...],
     results:    list,
@@ -142,13 +143,13 @@ def _add_fragment(
         return
     seen.add(canon)
 
-    frag_atoms = _embed_fragment(canon)
+    frag_atoms = embed_fragment(canon)
 
     # Fallback for multi-component SMILES: embed each component separately.
     if frag_atoms is None and "." in canon:
         parts = [Chem.MolToSmiles(p)
                  for p in Chem.GetMolFrags(parsed, asMols=True)]
-        embedded = [_embed_fragment(p) for p in parts]
+        embedded = [embed_fragment(p) for p in parts]
         if all(e is not None for e in embedded):
             frag_atoms = embedded[0]
             for e in embedded[1:]:
@@ -157,14 +158,14 @@ def _add_fragment(
     if frag_atoms is None:
         return
 
-    results.append(Compound._from_fragment(
+    results.append(Compound.from_fragment(
         smiles     = canon,
         atoms      = frag_atoms,
         parent_idx = parent_idx,
     ))
 
 
-def _add_radical_pairs(
+def add_radical_pairs(
     raws:    list,
     results: list,
     seen:    set[str],
@@ -173,26 +174,30 @@ def _add_radical_pairs(
     SMILES-level pairwise radical recombination over *raws*.
 
     Rule R1 — radical + radical:
-        Both fragments carry unpaired electrons; _combine_radicals enumerates
+        Both fragments carry unpaired electrons; combine_radicals enumerates
         all valid bond-formation products.  Residual radicals on the product
         are H-capped to guarantee a closed-shell species.
 
     Rule R2 — anion + radical:
         One fragment is a closed-shell anion (charge < 0, spin = 0); the
         other is a radical.  The anion is converted to its neutral radical via
-        _anion_to_radical (models EI electron stripping, e.g. [I-] → [I•]),
-        then _combine_radicals is applied as in R1.
+        anion_to_radical (models EI electron stripping, e.g. [I-] → [I•]),
+        then combine_radicals is applied as in R1.
 
     New fragments are appended to *results*; already-seen SMILES are skipped.
     """
+    n_before = len(results)
+    n_pairs  = 0
+
     for i, j in combinations(range(len(raws)), 2):
         fa, fb = raws[i], raws[j]
 
         if fa.spin > 0 and fb.spin > 0:
             # R1: radical + radical
-            for smi in _combine_radicals(fa.smiles, fb.smiles):
-                smi = _hcap_smiles(smi) or smi
-                _add_fragment(smi, fa.parent_idx + fb.parent_idx, results, seen)
+            n_pairs += 1
+            for smi in combine_radicals(fa.smiles, fb.smiles):
+                smi = hcap_smiles(smi) or smi
+                add_fragment(smi, fa.parent_idx + fb.parent_idx, results, seen)
         else:
             # R2: anion + radical (try both orderings)
             for anion, radical in ((fa, fb), (fb, fa)):
@@ -200,17 +205,67 @@ def _add_radical_pairs(
                     continue
                 if radical.spin == 0:
                     continue
-                rad_smi = _anion_to_radical(anion.smiles)
-                for smi in _combine_radicals(rad_smi, radical.smiles):
-                    smi = _hcap_smiles(smi) or smi
-                    _add_fragment(
+                n_pairs += 1
+                rad_smi = anion_to_radical(anion.smiles)
+                for smi in combine_radicals(rad_smi, radical.smiles):
+                    smi = hcap_smiles(smi) or smi
+                    add_fragment(
                         smi,
                         anion.parent_idx + radical.parent_idx,
                         results,
                         seen,
                     )
 
+    logger.debug(
+        "  add_radical_pairs: %d reactive pair(s) → %d new product(s).",
+        n_pairs, len(results) - n_before,
+    )
 
+
+def _collect_radical_pool(
+    compounds,
+    include_h_radical: bool = True,
+) -> list[str]:
+    """
+    Build a deduplicated list of radical SMILES from one or more Compounds.
+
+    For each compound's raw_fragments:
+      - Radical fragments (spin > 0) are added directly.
+      - Closed-shell anions (charge < 0, spin = 0) are converted to their
+        neutral radical form via :func:`anion_to_radical` (e.g. I⁻ → I•).
+
+    If *include_h_radical* is True, H• is appended to the pool to model
+    C–H (or N–H, O–H) bond homolysis under photon irradiation.
+    """
+    from rdkit import Chem
+
+    seen: set[str] = set()
+    pool: list[str] = []
+
+    for compound in compounds:
+        for frag in compound.raw_fragments:
+            if frag.spin > 0:
+                smi = frag.smiles
+            elif frag.charge < 0 and frag.spin == 0:
+                smi = anion_to_radical(frag.smiles)
+            else:
+                continue
+            if smi is None:
+                continue
+            mol = Chem.MolFromSmiles(smi)
+            if mol is None:
+                continue
+            if not any(a.GetNumRadicalElectrons() > 0 for a in mol.GetAtoms()):
+                continue
+            canon = Chem.MolToSmiles(mol)
+            if canon not in seen:
+                seen.add(canon)
+                pool.append(canon)
+
+    if include_h_radical and "[H]" not in seen:
+        pool.append("[H]")
+
+    return pool
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +280,7 @@ class Compound:
     Wraps any valid molecular representation (SMILES, InChI, .mol/.sdf, ASE
     Atoms, or RDKit Mol).  Fragments are enumerated lazily.
 
-    **Fragment mode** — created internally via ``Compound._from_fragment(...)``
+    **Fragment mode** — created internally via ``Compound.from_fragment(...)``
     Lightweight instance carrying a pre-computed SMILES and/or ASE Atoms but
     no RDKit Mol.  All properties (formula, mass, charge, spin, inchikey, …)
     work in both modes.  Fragmentation methods are not available.
@@ -281,8 +336,17 @@ class Compound:
         # MS spectrum (populated by load_ms_spectra or to_spectrum)
         self.spectrum     = None
 
+        logger.info(
+            "Compound loaded: %s | formula=%s | mw=%.4f Da | charge=%+d | %d heavy atoms",
+            self.name or "(unnamed)",
+            self.formula,
+            self.monoisotopic_mass,
+            self.charge,
+            self.n_heavy,
+        )
+
     @classmethod
-    def _from_fragment(
+    def from_fragment(
         cls,
         smiles:       str | None,
         atoms:        Atoms,
@@ -343,7 +407,7 @@ class Compound:
         return rdkit_to_ase(self._mol)
 
     @cached_property
-    def _smiles_mol(self):
+    def smiles_mol(self):
         """
         RDKit Mol built from self.smiles with all H made explicit.
 
@@ -367,9 +431,9 @@ class Compound:
             # Parent mode: derive from ASE atoms (includes all H in the conformer)
             return self.atoms.get_chemical_formula()
         # Fragment mode: prefer SMILES mol (includes capping H not in conformer)
-        if self._smiles_mol is not None:
+        if self.smiles_mol is not None:
             from rdkit.Chem import rdMolDescriptors
-            return rdMolDescriptors.CalcMolFormula(self._smiles_mol)
+            return rdMolDescriptors.CalcMolFormula(self.smiles_mol)
         return self.atoms.get_chemical_formula()
 
     @cached_property
@@ -393,7 +457,7 @@ class Compound:
             return rdMolDescriptors.CalcExactMolWt(self._mol)
         # Fragment mode
         if self.smiles is not None:
-            m = _monoisotopic_from_smiles(self.smiles)
+            m = monoisotopic_from_smiles(self.smiles)
             if m is not None:
                 return m
         return sum(
@@ -413,7 +477,7 @@ class Compound:
             from rdkit import Chem
             return Chem.GetFormalCharge(self._mol)
         if self.smiles is not None:
-            return _formal_charge_from_smiles(self.smiles)
+            return formal_charge_from_smiles(self.smiles)
         return 0
 
     @cached_property
@@ -425,9 +489,9 @@ class Compound:
         this is always 0.  Becomes non-zero only if the SMILES itself encodes
         a radical (e.g. '[CH3]').
         """
-        if self._smiles_mol is not None:
+        if self.smiles_mol is not None:
             return sum(a.GetNumRadicalElectrons()
-                       for a in self._smiles_mol.GetAtoms())
+                       for a in self.smiles_mol.GetAtoms())
         return 0
 
     # ------------------------------------------------------------------
@@ -442,7 +506,7 @@ class Compound:
         return smiles_to_inchikey(self.smiles)
 
     @cached_property
-    def _pubchem_info(self) -> dict:
+    def pubchem_info(self) -> dict:
         """
         CAS registry number and IUPAC name from PubChem (lazy, one network call).
 
@@ -471,12 +535,12 @@ class Compound:
     @cached_property
     def cas(self) -> str | None:
         """CAS registry number (fetched lazily from PubChem)."""
-        return self._pubchem_info.get("cas")
+        return self.pubchem_info.get("cas")
 
     @cached_property
     def common_name(self) -> str | None:
         """IUPAC name (fetched lazily from PubChem)."""
-        return self._pubchem_info.get("common_name")
+        return self.pubchem_info.get("common_name")
 
     # ------------------------------------------------------------------
     # MS helpers
@@ -579,13 +643,19 @@ class Compound:
             _spin = spin if spin is not None else 0
             if trajectory is None:
                 trajectory = "relaxation.traj"
+            logger.info(
+                "Relaxing parent %s (charge=%+d, spin=%d, fmax=%.1e, steps=%d) ...",
+                self.formula, self.charge, _spin, fmax, steps,
+            )
             system = self.atoms.copy()
             system.info["charge"] = self.charge
             system.info["spin"]   = _spin
             system.calc = calc
             opt = FIRE2(system, trajectory=trajectory, logfile=logfile)
-            opt.run(fmax=fmax, steps=steps)
+            converged = opt.run(fmax=fmax, steps=steps)
             self.update_geometry(system)
+            logger.info("Parent relaxation %s after %d steps.",
+                        "converged" if converged else "did NOT converge", opt.get_number_of_steps())
             return system
 
         # ---- Fragment mode ----
@@ -609,12 +679,21 @@ class Compound:
         if trajectory is not None:
             self.traj_path = str(trajectory)
 
+        logger.debug(
+            "Relaxing fragment %s (charge=%+d, spin=%d, fmax=%.1e, steps=%d) ...",
+            self.formula, self.charge, _spin, fmax, steps,
+        )
+
         self.atoms.info["charge"] = self.charge
         self.atoms.info["spin"]   = _spin
         self.atoms.calc = calc
 
         opt = FIRE2(self.atoms, trajectory=trajectory, logfile=logfile)
-        self.atoms.info["converged"] = opt.run(fmax=fmax, steps=steps)
+        converged = opt.run(fmax=fmax, steps=steps)
+        self.atoms.info["converged"] = converged
+        logger.debug("  -> %s (%d steps).",
+                     "converged" if converged else "did not converge",
+                     opt.get_number_of_steps())
         return self.atoms
 
     # ------------------------------------------------------------------
@@ -640,7 +719,7 @@ class Compound:
                 f"No relaxation trajectory for {self.formula!r} — "
                 "call relax() with a log_dir or trajectory path first."
             )
-        return _view(None, traj_path=self.traj_path)
+        return view(None, traj_path=self.traj_path)
 
     # ------------------------------------------------------------------
     # Fragmentation
@@ -648,85 +727,127 @@ class Compound:
 
     def do_fragmentation(
         self,
-        calc              = None,
-        hcap:  bool       = True,
-        fmax:  float      = 5e-2,
-        steps: int        = 100,
-        log_dir           = None,
-        bond_mult: float  = 1.2,
         max_heavy: int | None = None,
         max_cuts:  int        = 1,
         depth:     int        = 1,
     ) -> list:
         """
-        Build the fragment library using MLIP relaxation.
+        Enumerate chemically plausible EI-MS fragments from the parent molecule.
 
-        Two paths run in sequence when *calc* is provided:
+        **Physical model**
 
-        **Path A — relax raw radical/charged fragments (always)**
-          Each raw fragment is relaxed as-is (with its radical electrons and
-          formal charge).  After relaxation the bond graph is checked:
+        Electron-ionisation (EI) removes one electron from the neutral molecule M,
+        producing the radical cation M+•.  This species then undergoes sequential
+        bond cleavage: one bond breaks at a time, each step producing an ion and a
+        neutral radical.  The ion may fragment further in the same way.  A single
+        EI event therefore looks like a *cascade*:
 
-          - *single component*: fragment is kept as relaxed
-          - *split*: the original is discarded; each piece is extracted,
-            a SMILES is inferred by formula-matching against raw_fragments
-            (unique match only; otherwise smiles=None), optionally H-capped
-            if *hcap=True*, and then relaxed individually.
+            M  --EI-->  M+•  -->  [A]+ + B•  -->  [C]+ + D  --> …
 
-        **Path B — H-capped versions (additive, when hcap=True)**
-          Each raw fragment is H-capped at the SMILES level, embedded with
-          MMFF, and relaxed.  Results are deduplicated against Path A by
-          canonical SMILES.
+        This method models that cascade in two stages:
 
-        Without a *calc*, falls back to the pure SMILES-level enumeration
-        (_build_stable: H-cap + radical bonding + deprotonation, no relaxation).
+        **Stage 1 — bond enumeration** (:meth:`enumerate_raw`)
+
+            Every connected subgraph of heavy atoms that can be isolated by cutting
+            up to *max_cuts* labile σ bonds is enumerated.  Non-labile bonds
+            (aromatic C–C, C=O, C=C) are *never* cut — EI cannot break them as a
+            primary event.  Each surviving subgraph is stored as a *raw fragment*:
+            a radical SMILES where open valences (cut bonds) are represented by
+            unpaired electrons.
+
+            If *depth* > 1, the same bond enumeration is applied recursively to each
+            level-1 fragment, modelling secondary fragmentation events.
+
+        **Stage 2 — stabilisation** (:meth:`build_stable`)
+
+            Raw (radical) fragments are converted to observable, closed-shell
+            species by four SMILES-level rules applied in order:
+
+            1. **H-capping** — open valences are saturated with implicit H.
+               e.g. ``[CH2]CC[NH2+]`` (radical after C–N cut) becomes ``CCC[NH2+]``
+               then is deprotonated to ``CCCN`` (Rule 4).
+
+            2. **β-scission** — for each radical centre α and each single bond
+               α–β–γ, the β–γ bond is broken while α–β is upgraded to a double bond.
+               This models radical elimination, the dominant secondary pathway for
+               alkyl radicals.
+               e.g. tert-butyl radical → isobutylene (C=C(C)C) + H•
+
+            3. **Radical pairing** — all pairs of raw fragments are tried for
+               covalent bond formation:
+               * *radical + radical*: :func:`combine_radicals` enumerates every
+                 possible single/double/triple bond between radical centres.
+               * *anion + radical*: the anion is first converted to its neutral
+                 radical (models EI electron-stripping, e.g. I⁻ → I•), then the
+                 same bond-formation is attempted.  This is the route by which
+                 ion-pair precursors (e.g. ammonium iodide salts) produce covalent
+                 iodo-products (CH₃I, HI, …).
+
+            4. **Deprotonation** — for each cationic fragment (charge > 0) the first
+               protonated heteroatom (N, O, S) loses a proton.  EI-MS databases
+               index *neutral* species, so this step is required to find amines,
+               alcohols, etc. that originate from protonated precursors.
 
         Parameters
         ----------
-        calc      : ASE-compatible calculator; if None, SMILES-level only
-        hcap      : include H-capped versions (Path B) in addition to radicals
-        fmax      : FIRE2 force convergence threshold (eV/Ang)
-        steps     : maximum FIRE2 steps per fragment
-        log_dir   : directory for trajectory/log files; created if absent
-        bond_mult : covalent-radius multiplier for split detection (default 1.2)
-        max_heavy : cap on heavy atoms per fragment (default: no limit)
-        max_cuts  : maximum labile bonds cut per fragmentation step (default 1)
-        depth     : fragmentation cascade depth (default 1).
-                    depth=1 cuts bonds only on the parent molecule.
-                    depth=2 also cuts bonds on each H-capped level-1 fragment,
-                    modelling sequential EI fragmentation: M+• → A+ + B•, then
-                    A+ → C+ + D.  Depth > 2 extends the cascade further.
+        max_heavy : int or None
+            Maximum number of heavy atoms in any single fragment.  Set this to
+            limit the search space for large molecules (e.g. ``max_heavy=6``).
+            Default: no limit (enumerate all sizes up to the parent).
+        max_cuts : int
+            Maximum number of labile σ bonds cut *per enumeration step*.
+            ``max_cuts=1`` (default) cuts one bond at a time — appropriate for
+            primary EI fragments.  ``max_cuts=2`` allows two simultaneous cuts
+            (McLafferty rearrangement products, retro-Diels-Alder, …) but
+            expands the search space significantly.
+        depth : int
+            Cascade depth for sequential fragmentation.
+            ``depth=1`` (default): enumerate cuts on the parent only.
+            ``depth=2``: also enumerate cuts on each level-1 fragment, producing
+            secondary fragments (M → A → C).  Higher values are rarely needed.
 
         Returns
         -------
-        list of Compound objects in fragment mode (stored in self._fragments)
-        """
-        from rdkit import Chem
+        list of Compound
+            Stable (closed-shell) fragment objects, also stored in
+            ``self.fragments``.  Raw radical intermediates are in
+            ``self.raw_fragments`` and are used by :meth:`relax_fragments` and
+            :meth:`relax_recombination`.
 
-        # Store fragmentation parameters and reset any previous results so
-        # re-calling with different arguments produces fresh output.
+        Examples
+        --------
+        >>> mol = Compound("CC(C)(C)OC(=O)CC[NH3+].[I-]", name="EAI")
+        >>> frags = mol.do_fragmentation(max_heavy=6, depth=2)
+        >>> mol.summary()
+        """
+        # Store parameters and reset caches so re-calling gives fresh results.
         self.max_heavy      = max_heavy
         self.max_cuts       = max_cuts
         self._raw_fragments = None
         self._fragments     = None
 
-        # Level 1: enumerate cuts on the parent molecule.
-        self._raw_fragments = self._enumerate_raw()
+        logger.info(
+            "do_fragmentation: %s | max_heavy=%s | max_cuts=%d | depth=%d",
+            self.name or self.formula,
+            max_heavy if max_heavy is not None else "unlimited",
+            max_cuts,
+            depth,
+        )
 
-        # Depth > 1: sequential cascade — cut 1 bond at a time on each
-        # H-capped level-N fragment to produce level-(N+1) fragments.
-        # This models EI fragmentation as a cascade rather than simultaneous
-        # multi-bond cleavage.
+        # Level 1: enumerate labile σ-bond cuts on the parent molecule.
+        self._raw_fragments = self.enumerate_raw()
+
+        # Depth > 1: sequential cascade.
         if depth > 1:
-            seen_smiles  = {f.smiles for f in self._raw_fragments if f.smiles}
+            seen_smiles   = {f.smiles for f in self._raw_fragments if f.smiles}
             current_level = list(self._raw_fragments)
 
             for _level in range(depth - 1):
                 next_level    = []
-                level_hcapped = set()   # avoid re-fragmenting the same stable SMILES
+                level_hcapped = set()
 
                 for raw in current_level:
-                    stable_smi = _hcap_smiles(raw.smiles)
+                    stable_smi = hcap_smiles(raw.smiles)
                     if stable_smi is None or stable_smi in level_hcapped:
                         continue
                     level_hcapped.add(stable_smi)
@@ -736,190 +857,33 @@ class Compound:
                     except Exception:
                         continue
 
-                    sub_frags = self._enumerate_raw(mol=sub_mol)
+                    sub_frags = self.enumerate_raw(mol=sub_mol)
                     for sf in sub_frags:
                         if sf.smiles and sf.smiles not in seen_smiles:
                             seen_smiles.add(sf.smiles)
                             self._raw_fragments.append(sf)
                             next_level.append(sf)
 
-                current_level = next_level   # feed into the next cascade level
+                current_level = next_level
                 if not current_level:
-                    break                    # no new fragments → cascade exhausted
+                    break
 
-        raws = self._raw_fragments
-
-        if calc is None:
-            # No MLIP: pure SMILES-level stabilisation
-            self._fragments = self._build_stable()
-            return self._fragments
-
-        d = Path(log_dir) if log_dir is not None else None
-        if d is not None:
-            d.mkdir(parents=True, exist_ok=True)
-
-        results: list[Compound] = []
-        seen:    set[str]       = set()   # canonical SMILES deduplication
-
-        # Formula-to-raw_fragments map for split-component SMILES inference
-        formula_map: dict[str, list] = {}
-        for raw in raws:
-            formula_map.setdefault(raw.formula, []).append(raw)
-
-        # ----------------------------------------------------------------
-        # Path A: relax each raw radical/charged fragment
-        # ----------------------------------------------------------------
-        for i, raw in enumerate(raws):
-            stem     = f"{i:03d}_{raw.formula}"
-            raw_traj = str(d / f"{stem}_raw.traj") if d else None
-            raw_log  = str(d / f"{stem}_raw.log")  if d else None
-
-            raw.relax(calc, fmax=fmax, steps=steps,
-                      trajectory=raw_traj, logfile=raw_log)
-
-            components = _extract_components(raw.atoms, bond_mult=bond_mult)
-
-            if len(components) == 1:
-                logger.info("  %s: stable after radical relaxation.", stem)
-                if raw.smiles is None or raw.smiles not in seen:
-                    if raw.smiles is not None:
-                        seen.add(raw.smiles)
-                    results.append(raw)
-
-            else:
-                logger.info(
-                    "  %s: split into %d components after relaxation.", stem, len(components)
-                )
-                for k, comp_atoms in enumerate(components):
-                    comp_formula = comp_atoms.get_chemical_formula()
-                    matches      = formula_map.get(comp_formula, [])
-
-                    if len(matches) == 1:
-                        comp_smiles = matches[0].smiles
-                    elif len(matches) > 1:
-                        logger.warning(
-                            "    piece %d (%s): ambiguous formula match (%d raws) "
-                            "— smiles=None, charge=0, spin=0",
-                            k, comp_formula, len(matches),
-                        )
-                        comp_smiles = None
-                    else:
-                        comp_smiles = None
-
-                    if hcap and comp_smiles is not None:
-                        comp_smiles = _hcap_smiles(comp_smiles) or comp_smiles
-
-                    comp_frag = Compound._from_fragment(
-                        smiles     = comp_smiles,
-                        atoms      = comp_atoms,
-                        parent_idx = raw.parent_idx,
-                    )
-                    comp_traj = str(d / f"{stem}_piece{k}.traj") if d else None
-                    comp_log  = str(d / f"{stem}_piece{k}.log")  if d else None
-                    comp_frag.relax(calc, fmax=fmax, steps=steps,
-                                    trajectory=comp_traj, logfile=comp_log)
-
-                    if comp_smiles is None or comp_smiles not in seen:
-                        if comp_smiles is not None:
-                            seen.add(comp_smiles)
-                        results.append(comp_frag)
-
-        # ----------------------------------------------------------------
-        # Path B: H-capped versions (additive)
-        # ----------------------------------------------------------------
-        if hcap:
-            for i, raw in enumerate(raws):
-                smi = _hcap_smiles(raw.smiles)
-                if smi is None:
-                    continue
-                parsed = Chem.MolFromSmiles(smi)
-                if parsed is None:
-                    continue
-                canon = Chem.MolToSmiles(parsed)
-                if canon in seen:
-                    continue
-                seen.add(canon)
-
-                frag_atoms = _embed_fragment(canon)
-                if frag_atoms is None:
-                    continue
-
-                hcap_frag = Compound._from_fragment(
-                    smiles     = canon,
-                    atoms      = frag_atoms,
-                    parent_idx = raw.parent_idx,
-                )
-                stem      = f"{i:03d}_{raw.formula}"
-                hcap_traj = str(d / f"{stem}_hcap.traj") if d else None
-                hcap_log  = str(d / f"{stem}_hcap.log")  if d else None
-                hcap_frag.relax(calc, fmax=fmax, steps=steps,
-                                trajectory=hcap_traj, logfile=hcap_log)
-                results.append(hcap_frag)
-
-        # Deprotonation: for every cationic fragment, also add the neutral
-        # (deprotonated) form so that EI-MS databases can find it.
-        # Note: ion pairs, β-scission, and H-migration are deferred (see project_deferred.md).
-        depr_seen = {f.smiles for f in results if f.smiles is not None}
-        for frag in list(results):
-            if frag.charge <= 0:
-                continue
-            smi = _deprotonate_smiles(frag.smiles)
-            if smi is None or smi in depr_seen:
-                continue
-            frag_atoms = _embed_fragment(smi)
-            if frag_atoms is None:
-                continue
-            depr_seen.add(smi)
-            results.append(Compound._from_fragment(
-                smiles     = smi,
-                atoms      = frag_atoms,
-                parent_idx = frag.parent_idx,
-            ))
-
-        results.sort(key=lambda f: (f.n_heavy, f.formula))
-        logger.info(
-            "do_fragmentation: %d fragments built from %d raw cuts.", len(results), len(raws)
-        )
-        self._fragments = results
+        # Build stable fragment list from raw cuts (SMILES-level).
+        self._fragments = self.build_stable()
         return self._fragments
 
-    def do_recombination(
-        self,
-        calc             = None,
-        gap:       float = 1.5,
-        fmax:      float = 5e-2,
-        steps:     int   = 100,
-        log_dir          = None,
-        bond_mult: float = 1.2,
-    ) -> list:
+    def do_recombination(self) -> list:
         """
         Try all pairwise recombinations of raw_fragments and add stable
-        products to the fragment library.
+        products to the fragment library (SMILES-level, no calculator required).
 
-        Two modes depending on whether a calculator is provided:
+        For each pair of raw fragments, :func:`combine_radicals` enumerates
+        all chemically valid bond-formation products (single, double, and triple
+        bonds between every pair of radical centres).  Products already in the
+        fragment library (by canonical SMILES) are silently skipped.
 
-        **SMILES-level (calc=None, fast)**
-          For each pair of radical raw fragments, :func:`_combine_radicals`
-          enumerates all chemically valid bond-formation products at the
-          SMILES level (single, double, and triple bonds between every pair
-          of radical centres).  Products that are already in the fragment
-          library (by canonical SMILES) are skipped.  No geometry
-          optimisation is performed.
-
-        **MLIP (calc provided, slow)**
-          Each pair of raw fragments is placed with their reactive centres
-          *gap* Å apart and relaxed with FIRE2.  Only candidates that
-          converge to a single connected molecule are kept.  Products receive
-          ``smiles=None`` (3-D structure only; NIST lookup uses formula).
-
-        Parameters
-        ----------
-        calc      : ASE-compatible calculator; None means SMILES-level (default)
-        gap       : reactive-centre separation for initial MLIP placement (Å)
-        fmax      : FIRE2 force convergence threshold (eV/Å)
-        steps     : maximum FIRE2 steps per candidate
-        log_dir   : directory for MLIP trajectory/log files; created if absent
-        bond_mult : covalent-radius multiplier for bond detection (default 1.2)
+        For geometry optimisation and MLIP-verified bond formation, call
+        :meth:`relax_recombination` afterwards.
 
         Returns
         -------
@@ -927,48 +891,23 @@ class Compound:
         """
         # Raises RuntimeError if do_fragmentation() has not been called yet.
         _ = self.fragments
+        return self.recombine_smiles()
 
-        if calc is None:
-            return self._recombine_smiles()
-
-        # ----------------------------------------------------------------
-        # MLIP path
-        # ----------------------------------------------------------------
-        from .recombination import relax_all_recombinations
-
-        products = relax_all_recombinations(
-            self.raw_fragments, calc,
-            gap=gap, fmax=fmax, steps=steps,
-            log_dir=log_dir, bond_mult=bond_mult,
-        )
-
-        added = []
-        for atoms in products:
-            frag = Compound._from_fragment(smiles=None, atoms=atoms, parent_idx=())
-            self._fragments.append(frag)
-            added.append(frag)
-
-        logger.info(
-            "do_recombination (MLIP): added %d product(s) to fragment library.",
-            len(added),
-        )
-        return added
-
-    def _recombine_smiles(self) -> list:
+    def recombine_smiles(self) -> list:
         """
         SMILES-level pairwise recombination (no MLIP).
 
         Two rules are applied over all pairs of raw fragments:
 
         **Rule R1 — radical + radical**
-          Both fragments carry unpaired electrons; :func:`_combine_radicals`
+          Both fragments carry unpaired electrons; :func:`combine_radicals`
           enumerates all valid bond-formation products.
 
         **Rule R2 — anion + radical**
           One fragment is a closed-shell anion (charge < 0, spin = 0) and
           the other is a radical.  The anion is first converted to its neutral
-          radical form via :func:`_anion_to_radical` (models EI electron
-          stripping, e.g. [I-] becomes [I•]), then :func:`_combine_radicals` is
+          radical form via :func:`anion_to_radical` (models EI electron
+          stripping, e.g. [I-] becomes [I•]), then :func:`combine_radicals` is
           applied as in Rule R1.  This allows ion-pair compounds such as
           ammonium iodides to produce covalent iodo-products (CH3I, HI, …).
 
@@ -979,7 +918,7 @@ class Compound:
         seen      = {f.smiles for f in self._fragments if f.smiles is not None}
         new_frags : list[Compound] = []
 
-        _add_radical_pairs(raws, new_frags, seen)
+        add_radical_pairs(raws, new_frags, seen)
 
         self._fragments.extend(new_frags)
         self._fragments.sort(key=lambda f: (f.n_heavy, f.formula))
@@ -987,6 +926,130 @@ class Compound:
             "do_recombination (SMILES): added %d product(s) to fragment library.",
             len(new_frags),
         )
+        return new_frags
+
+    @classmethod
+    def solid_state_recombination(
+        cls,
+        compounds,
+        include_h_radical: bool = True,
+    ) -> list:
+        """
+        Model solid-state radical recombination across one or more compounds.
+
+        In solid-state photolysis (UV, X-ray, synchrotron irradiation),
+        neighboring molecules in the lattice share a common radical pool.
+        This classmethod enables two reaction types that single-molecule EI
+        models cannot produce:
+
+        1. **Self-pairing** — the same radical reacts with another copy of
+           itself (e.g. I• + I• → I₂, CH₃• + CH₃• → C₂H₆).
+        2. **Cross-compound pairing** — radicals from different components of
+           the film recombine (e.g. an organic radical + a halide radical from
+           the inorganic framework).
+        3. **H radical** — H• from bond homolysis combines with any radical
+           in the pool (H• + I• → HI, H• + H• → H₂).
+
+        **Algorithm**
+
+        1. Collect unique radical SMILES from all compounds via
+           :func:`_collect_radical_pool` (radicals directly; anions converted
+           via :func:`anion_to_radical`; optionally H•).
+        2. Enumerate all pairs *with replacement* using
+           :func:`combine_radicals`.  H-cap residual radical centres.
+        3. Products already present in any compound's fragment list are
+           silently skipped.
+
+        All compounds must have :meth:`do_fragmentation` called first.
+
+        Parameters
+        ----------
+        compounds : list of Compound
+            One or more compounds whose radical pools are merged.
+        include_h_radical : bool
+            Include H• in the pool (default True).
+
+        Returns
+        -------
+        list of Compound
+            Newly produced fragments (not yet added to any compound's list —
+            the caller decides where they go).
+
+        Examples
+        --------
+        >>> eai  = Compound("CC(C)(C)OC(=O)CC[NH3+].[I-]", name="EAI")
+        >>> pbi2 = Compound("I[Pb]I",                        name="PbI2")
+        >>> eai.do_fragmentation(max_heavy=6, depth=2)
+        >>> pbi2.do_fragmentation(max_heavy=4, depth=1)
+        >>> new_frags = Compound.solid_state_recombination([eai, pbi2])
+        """
+        from itertools import combinations_with_replacement
+        from rdkit import RDLogger as _RDLogger
+
+        pool  = _collect_radical_pool(compounds, include_h_radical)
+        names = [c.name or c.formula for c in compounds]
+
+        logger.info(
+            "solid_state_recombination [%s]: %d radical species in pool: %s",
+            ", ".join(names), len(pool), pool,
+        )
+
+        # Deduplicate against all existing fragments across all compounds.
+        seen = {
+            f.smiles
+            for c in compounds
+            for f in c.fragments
+            if f.smiles is not None
+        }
+
+        new_frags: list[Compound] = []
+        n_pairs = 0
+
+        # Suppress RDKit warning triggered by H• intermediates.
+        _rdlog = _RDLogger.logger()
+        _rdlog.setLevel(_RDLogger.ERROR)
+        try:
+            for i, j in combinations_with_replacement(range(len(pool)), 2):
+                products = combine_radicals(pool[i], pool[j])
+                if products:
+                    n_pairs += 1
+                for smi in products:
+                    add_fragment(hcap_smiles(smi) or smi, (), new_frags, seen)
+        finally:
+            _rdlog.setLevel(_RDLogger.WARNING)
+
+        logger.info(
+            "solid_state_recombination: %d reactive pair(s) → %d new product(s).",
+            n_pairs, len(new_frags),
+        )
+        return new_frags
+
+    def do_solid_state_recombination(
+        self,
+        include_h_radical: bool = True,
+    ) -> list:
+        """
+        Solid-state radical recombination for this compound.
+
+        Convenience wrapper around the classmethod
+        :meth:`solid_state_recombination` for the single-compound case.
+        Results are appended to ``self.fragments``.
+
+        Requires :meth:`do_fragmentation` to have been called first.
+
+        Parameters
+        ----------
+        include_h_radical : bool
+            Include H• in the radical pool (default True).
+
+        Returns
+        -------
+        list of newly added Compound objects (in fragment mode)
+        """
+        _ = self.fragments  # guard: raises if do_fragmentation() not called
+        new_frags = Compound.solid_state_recombination([self], include_h_radical)
+        self._fragments.extend(new_frags)
+        self._fragments.sort(key=lambda f: (f.n_heavy, f.formula))
         return new_frags
 
     # ------------------------------------------------------------------
@@ -1017,7 +1080,7 @@ class Compound:
         Built by three rules applied in order:
           1. H-cap each radical raw fragment (closed-shell neutral/ion)
           2. SMILES-level radical bonding for every pair of radical fragments
-             (radical+radical and anion+radical via _combine_radicals)
+             (radical+radical and anion+radical via combine_radicals)
           3. Deprotonated counterparts of cationic fragments (for DB lookup)
 
         Use raw_fragments for MLIP recombination; use this for MS peak assignment.
@@ -1056,27 +1119,50 @@ class Compound:
     # Internal enumeration
     # ------------------------------------------------------------------
 
-    def _enumerate_raw(self, mol=None) -> list:
+    def enumerate_raw(self, mol=None) -> list:
         """
-        Enumerate all connected subgraph cuts as radical (uncapped) fragments.
+        Enumerate all connected subsets of heavy atoms as *raw* (radical) fragments.
 
-        For each connected subset of heavy atoms (plus their bonded H if
-        include_h is True), builds a Compound in fragment mode with:
-          - SMILES using _canonical_smiles_radical (radical electrons mark cuts)
-          - 3-D positions taken directly from the parent conformer (no embedding)
+        A raw fragment represents the molecule after one or more bonds have been
+        cut but *before* any stabilisation (H-capping, β-scission, radical
+        pairing).  The cut sites are encoded as unpaired radical electrons in the
+        SMILES string — the same convention RDKit uses for radical species.
+
+        **Algorithm**
+
+        1. Every connected subset of heavy atoms of size 1 … *max_heavy* is
+           considered (power-set enumeration).
+        2. The boundary bonds — bonds connecting the subset to the rest of the
+           molecule — are inspected for *lability*:
+           * Any **non-labile** crossing bond (aromatic C–C, C=O, C=C conjugated,
+             triple bonds) disqualifies the entire subset: EI cannot break these
+             bonds as a primary event.
+           * The number of labile crossing bonds must not exceed *max_cuts*.
+        3. Surviving subsets are converted to SMILES with
+           :func:`canonical_smiles_radical`, where each atom at a cut site carries
+           one extra radical electron per broken bond.
+        4. Duplicate SMILES are dropped (controlled by ``self.deduplicate``).
+        5. 3-D positions are taken directly from the parent conformer — no
+           re-embedding at this stage.
 
         Parameters
         ----------
         mol : RDKit Mol, optional
-            Molecule to enumerate cuts on.  Defaults to self._mol (the parent).
-            Pass a different mol to enumerate cuts on a sub-fragment (used by
-            the sequential depth model in do_fragmentation).
+            Molecule to enumerate cuts on.  Defaults to ``self._mol`` (the parent).
+            :meth:`do_fragmentation` passes H-capped level-1 fragments here when
+            ``depth > 1`` to model secondary fragmentation cascades.
+
+        Returns
+        -------
+        list of Compound
+            Raw fragments sorted by (n_heavy, formula).  Each fragment has
+            ``smiles``, ``atoms`` (ASE Atoms), and ``parent_idx`` set.
         """
         from rdkit import Chem
 
         mol  = mol if mol is not None else self._mol
         conf = mol.GetConformer()
-        adj  = _adjacency(mol)
+        adj  = adjacency(mol)
         n    = mol.GetNumAtoms()
 
         # Kekulize so aromatic bonds become explicit SINGLE/DOUBLE.
@@ -1108,7 +1194,7 @@ class Compound:
         for size in range(1, max_heavy + 1):
             for heavy_sub in combinations(heavy_idx, size):
                 fs = frozenset(heavy_sub)
-                if not _is_connected(fs, adj):
+                if not is_connected(fs, adj):
                     continue
 
                 subset = set(heavy_sub)
@@ -1127,13 +1213,13 @@ class Compound:
                     for i in subset for j in adj[i]
                     if j not in subset
                 ]
-                if any(not _is_labile(b) for b in crossing):
+                if any(not is_labile(b) for b in crossing):
                     continue
                 n_cuts = len(crossing)
                 if n_cuts > self.max_cuts:
                     continue
 
-                smi = _canonical_smiles_radical(kmol, subset)
+                smi = canonical_smiles_radical(kmol, subset)
 
                 if self.deduplicate and smi is not None:
                     if smi in seen:
@@ -1151,7 +1237,7 @@ class Compound:
                     if any(j not in subset for j in adj[pi])
                 )
 
-                results.append(Compound._from_fragment(
+                results.append(Compound.from_fragment(
                     smiles       = smi,
                     atoms        = frag_atoms,
                     parent_idx   = tuple(ordered),
@@ -1162,43 +1248,120 @@ class Compound:
         logger.info("Found %d unique raw fragments.", len(results))
         return results
 
-    def _build_stable(self) -> list:
+    def build_stable(self) -> list:
         """
-        Build the stable fragment list from raw_fragments.
+        Convert raw (radical) fragments to stable, database-queryable species.
 
-        1. H-cap each radical raw fragment to give a closed-shell species.
-        2. SMILES-level bond formation for fragment pairs:
-             a. radical + radical: covalent product via _combine_radicals
-             b. anion + radical: covalent neutral product (models EI electron
-                stripping of the anion, e.g. [I-] becomes [I•], then I•+R• becomes RI)
-        3. Neutral (deprotonated) counterparts of cationic fragments so that
-           EI-MS databases (which index neutral molecules) can find them.
+        Applies four chemical rules in sequence to ``self.raw_fragments``.
+        All results are deduplicated by canonical SMILES before being added.
 
-        Note: ion pairs, β-scission, and H-migration are deferred (see project_deferred.md).
+        **Rule 1 — H-capping**
+            Every radical open-valence is saturated with a hydrogen atom.
+            This is the simplest stabilisation: the fragment retains its heavy-atom
+            skeleton and all unpaired electrons are quenched by implicit H.
+            Example: ``[CH2•]CC`` → ``CCC`` (propane)
+
+        **Rule 2 — β-scission**
+            For each radical centre α and each *single* bond α–β–γ:
+            * Break the β–γ bond (γ gains a radical electron).
+            * Upgrade α–β from single to double bond (α uses its radical electron
+              to form the π bond).
+            Both resulting fragments (the alkene/imine/etc. and the γ-radical, H-capped)
+            are added to the stable list.  β-scission is the primary route by which
+            alkyl radicals give alkenes; it also explains why EI spectra of
+            carbamates and esters show strong olefin peaks.
+            Example: tert-butyl radical ``[C•](C)(C)C`` → isobutylene ``C=C(C)C``
+
+        **Rule 3 — Radical pairing**
+            All pairs (A, B) of raw fragments are tried for covalent bond formation:
+
+            * *Radical + radical*: both carry unpaired electrons;
+              :func:`combine_radicals` enumerates single/double/triple bonds between
+              every pair of radical centres.
+            * *Anion + radical*: the anion (charge < 0, spin = 0) is converted to
+              its neutral radical via :func:`anion_to_radical` (models EI
+              electron-stripping, e.g. I⁻ → I•), then :func:`combine_radicals` is
+              applied.  This is the mechanism by which ammonium iodide salts produce
+              covalent iodo-products (CH₃I, HI, …) in the gas phase.
+
+        **Rule 4 — Deprotonation**
+            For each cationic fragment already in the stable list (charge > 0),
+            :func:`deprotonate_smiles` removes one proton from the first protonated
+            heteroatom (N, O, or S).  EI-MS reference databases (NIST, MassBank)
+            index *neutral* closed-shell species, so cationic fragments such as
+            ``CC[NH3+]`` must be deprotonated to ``CCN`` before a database lookup.
+
+        .. note::
+            Ion pairs are excluded.  See ``project_deferred.md``.
+
+        Returns
+        -------
+        list of Compound
+            Stable fragments sorted by (n_heavy, formula).
         """
         seen:    set[str]      = set()
         results: list[Compound] = []
         raws = self.raw_fragments
 
-        # Rule 1: H-cap every raw fragment
+        # Rule 1: H-cap every raw fragment.
         for raw in raws:
-            smi = _hcap_smiles(raw.smiles)
-            _add_fragment(smi, raw.parent_idx, results, seen)
+            smi = hcap_smiles(raw.smiles)
+            add_fragment(smi, raw.parent_idx, results, seen)
+        n1 = len(results)
+        logger.debug("  Rule 1 (H-cap):       %d fragment(s)", n1)
 
-        # Rule 2: radical pairing (radical+radical and anion+radical).
-        _add_radical_pairs(raws, results, seen)
+        # Rule 2: β-scission products of radical fragments.
+        for raw in raws:
+            if raw.spin == 0:
+                continue
+            for smi in beta_scission_products(raw.smiles):
+                add_fragment(smi, raw.parent_idx, results, seen)
+        n2 = len(results) - n1
+        logger.debug("  Rule 2a (β-scission): %d new fragment(s)", n2)
 
-        # Rule 3: deprotonated counterparts of cationic fragments.
+        # Rule 2b: H-migration (McLafferty rearrangement) on radical fragments.
+        _before_2b = len(results)
+        for raw in raws:
+            if raw.spin == 0:
+                continue
+            for smi in h_migration_products(raw.smiles):
+                add_fragment(smi, raw.parent_idx, results, seen)
+        n2b = len(results) - _before_2b
+        logger.debug("  Rule 2b (H-migr):     %d new fragment(s)", n2b)
+
+        # Rule 3: radical pairing (radical+radical and anion+radical).
+        add_radical_pairs(raws, results, seen)
+        n3 = len(results) - n1 - n2 - n2b
+        logger.debug("  Rule 3 (rad pairing): %d new fragment(s)", n3)
+
+        # Rule 4: deprotonated counterparts of cationic fragments.
         for frag in list(results):
             if frag.charge <= 0:
                 continue
-            smi = _deprotonate_smiles(frag.smiles)
+            smi = deprotonate_smiles(frag.smiles)
             if smi is not None:
-                _add_fragment(smi, frag.parent_idx, results, seen)
+                add_fragment(smi, frag.parent_idx, results, seen)
+        n4 = len(results) - n1 - n2 - n2b - n3
+        logger.debug("  Rule 4 (deprotonate): %d new fragment(s)", n4)
+
+        # Rule 5: α-dehydrogenation — loss of H from carbons α to
+        # heteroatoms followed by β-scission.  Produces vinyl halides,
+        # enol ethers, etc. from closed-shell recombination products.
+        _before_5 = len(results)
+        for frag in list(results):
+            if frag.spin > 0 or frag.charge != 0:
+                continue
+            for smi in alpha_dehydrogenation_products(frag.smiles):
+                add_fragment(smi, frag.parent_idx, results, seen)
+        n5 = len(results) - _before_5
+        logger.debug("  Rule 5 (α-dehydro):   %d new fragment(s)", n5)
 
         results.sort(key=lambda f: (f.n_heavy, f.formula))
         logger.info(
-            "Built %d stable fragments from %d raw fragments.", len(results), len(raws)
+            "Built %d stable fragments from %d raw fragments "
+            "(H-cap: %d | β-scission: %d | H-migr: %d | rad-pairs: %d "
+            "| deprotonate: %d | α-dehydro: %d).",
+            len(results), len(raws), n1, n2, n2b, n3, n4, n5,
         )
         return results
 
@@ -1257,7 +1420,7 @@ class Compound:
 
     def view(self):
         """Open this compound in the ASE GUI viewer."""
-        return _view(self.atoms)
+        return view(self.atoms)
 
     def view_fragments(self, indices=None, raw: bool = False):
         """
@@ -1275,19 +1438,30 @@ class Compound:
             atoms_list = [frags[indices].atoms]
         else:
             atoms_list = [frags[i].atoms for i in indices]
-        return _view(atoms_list)
+        return view(atoms_list)
 
     def relax_fragments(self, calc, fmax: float = 5e-2, steps: int = 100,
                         log_dir=None):
         """
-        Relax all fragment geometries in-place using an ASE calculator.
+        Relax all stable fragment geometries in-place using an ASE calculator.
+
+        Requires :meth:`do_fragmentation` to have been called first.
 
         Parameters
         ----------
+        calc    : ASE-compatible calculator (e.g. FAIRChemCalculator)
+        fmax    : FIRE2 force convergence threshold (eV/Ang)
+        steps   : maximum number of FIRE2 steps per fragment
         log_dir : directory to write per-fragment trajectory and log files
                   named <index>_<formula>.traj / .log; created if absent
         """
+        n_frags = len(self.fragments)
+        logger.info("relax_fragments: relaxing %d fragment(s) (fmax=%.1e, steps=%d) ...",
+                    n_frags, fmax, steps)
+
         for i, frag in enumerate(self.fragments):
+            logger.debug("  [%d/%d] %s | charge=%+d | spin=%d",
+                         i + 1, n_frags, frag.formula, frag.charge, frag.spin)
             traj = log = None
             if log_dir is not None:
                 d    = Path(log_dir)
@@ -1297,6 +1471,66 @@ class Compound:
                 log  = str(d / f"{stem}.log")
             frag.relax(calc, fmax=fmax, steps=steps,
                        trajectory=traj, logfile=log)
+
+        logger.info("relax_fragments: done.")
+
+    def relax_recombination(
+        self,
+        calc,
+        gap:       float = 1.5,
+        fmax:      float = 5e-2,
+        steps:     int   = 100,
+        log_dir          = None,
+        bond_mult: float = 1.2,
+    ) -> list:
+        """
+        MLIP-verified pairwise recombination of raw_fragments.
+
+        Each pair of radical raw fragments is placed with their reactive centres
+        *gap* Å apart and relaxed with FIRE2.  Only candidates that converge to
+        a single connected molecule are kept and added to the fragment library.
+        Products receive ``smiles=None`` (3-D geometry only).
+
+        Call :meth:`do_recombination` first for the fast SMILES-level step, then
+        call this for the more expensive geometry-verified step.
+
+        Requires :meth:`do_fragmentation` to have been called first.
+
+        Parameters
+        ----------
+        calc      : ASE-compatible calculator (e.g. FAIRChemCalculator)
+        gap       : reactive-centre separation for initial placement (Å)
+        fmax      : FIRE2 force convergence threshold (eV/Å)
+        steps     : maximum FIRE2 steps per candidate
+        log_dir   : directory for trajectory/log files; created if absent
+        bond_mult : covalent-radius multiplier for bond detection (default 1.2)
+
+        Returns
+        -------
+        list of newly added Compound objects (in fragment mode, smiles=None)
+        """
+        # Raises RuntimeError if do_fragmentation() has not been called yet.
+        _ = self.fragments
+
+        from .recombination import relax_all_recombinations
+
+        products = relax_all_recombinations(
+            self.raw_fragments, calc,
+            gap=gap, fmax=fmax, steps=steps,
+            log_dir=log_dir, bond_mult=bond_mult,
+        )
+
+        added = []
+        for atoms in products:
+            frag = Compound.from_fragment(smiles=None, atoms=atoms, parent_idx=())
+            self._fragments.append(frag)
+            added.append(frag)
+
+        logger.info(
+            "relax_recombination: added %d MLIP-verified product(s) to fragment library.",
+            len(added),
+        )
+        return added
 
     # ------------------------------------------------------------------
     # Bridge to rgakit
@@ -1401,15 +1635,15 @@ class Compound:
         """
         Convert this compound to a MassSpectrum for use in a SpectraLibrary.
 
-        Delegates to :func:`~rgakit.molecule._bridge.fragment_to_spectrum`.
-        All keyword arguments are forwarded (e.g. ``db=``, ``mb_db=``,
-        ``nist_only=``, ``formula_fallback=``).
+        Delegates to :func:`~rgakit.molecule.bridge.fragment_to_spectrum`.
+        All keyword arguments are forwarded (e.g. ``databases=``,
+        ``nist_lookup=``, ``formula_fallback=``).
 
         Parameters
         ----------
         nist_lookup : attempt NIST lookup (default True); set False for offline use
         """
-        from rgakit.molecule._bridge import fragment_to_spectrum
+        from rgakit.molecule.bridge import fragment_to_spectrum
         return fragment_to_spectrum(self, nist_lookup=nist_lookup, **kwargs)
 
     def to_library(
@@ -1419,8 +1653,7 @@ class Compound:
         formula_fallback: bool = False,
         formula_all:      bool = False,
         max_workers:      int  = 8,
-        db                     = None,
-        mb_db                  = None,
+        databases               = None,
     ):
         """
         Build a SpectraLibrary from the stable fragments of this compound.
@@ -1438,10 +1671,11 @@ class Compound:
         formula_all      : for NIST misses, add ALL NIST isomers that share
                            the same molecular formula (default False)
         max_workers      : number of threads for concurrent lookups (default 8)
-        db               : optional InSilicoDatabase; queried first (fast, offline)
-        mb_db            : optional MassBankDatabase; queried after in-silico
+        databases        : one database or a list of databases, queried in order
+                           (InSilicoDatabase, NistDatabase, MassBankDatabase,
+                           MonaLocalDatabase, …); all share the same interface
         """
-        from rgakit.molecule._bridge import compound_to_library
+        from rgakit.molecule.bridge import compound_to_library
         return compound_to_library(
             self,
             nist_lookup      = nist_lookup,
@@ -1449,8 +1683,7 @@ class Compound:
             formula_fallback = formula_fallback,
             formula_all      = formula_all,
             max_workers      = max_workers,
-            db               = db,
-            mb_db            = mb_db,
+            databases        = databases,
         )
 
     # ------------------------------------------------------------------

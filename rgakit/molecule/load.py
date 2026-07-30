@@ -1,22 +1,22 @@
 """
-_load.py
+load.py
 Molecule I/O and 3-D embedding helpers.
 
 Parses any molecular representation into a sanitised RDKit Mol with explicit H
 and a 3-D MMFF-optimised conformer.  Format conversions between rdkit and ase
-live in _utils; this module is purely about geometry generation.
+live in utils; this module is purely about geometry generation.
 """
 
 from __future__ import annotations
 
 from ase import Atoms
 
-from ._utils import ase_to_rdkit, rdkit_to_ase
+from .utils import ase_to_rdkit, rdkit_to_ase
 
 import numpy as np
 
 
-def _embed_single(mol):
+def embed_single(mol):
     """Embed a single-component RDKit Mol (with explicit H) and MMFF-optimise."""
     from rdkit.Chem import AllChem
 
@@ -32,7 +32,7 @@ def _embed_single(mol):
     return mol
 
 
-def _embed_multicomponent(mol):
+def embed_multicomponent(mol):
     """
     Embed a multi-component RDKit Mol with chemically sensible ion placement.
 
@@ -57,7 +57,7 @@ def _embed_multicomponent(mol):
     embedded  = []
     for frag in frag_mols:
         frag = Chem.AddHs(frag)
-        _embed_single(frag)
+        embed_single(frag)
         embedded.append(frag)
 
     def _charged_atoms(frag):
@@ -166,13 +166,13 @@ def load_rdkit_mol(source):
         raise ValueError(f"Could not parse molecule from: {source!r}")
 
     if len(Chem.GetMolFrags(mol)) > 1:
-        return _embed_multicomponent(mol)
+        return embed_multicomponent(mol)
 
     mol = Chem.AddHs(mol)
-    return _embed_single(mol)
+    return embed_single(mol)
 
 
-def _embed_fragment(smi: str) -> Atoms | None:
+def embed_fragment(smi: str) -> Atoms | None:
     """
     Build a properly H-capped 3-D structure for a fragment SMILES.
 

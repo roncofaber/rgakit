@@ -246,7 +246,7 @@ class LocalSpectralDatabase:
         label = None
 
         if "smiles" in given:
-            from rgakit.molecule._utils import smiles_to_inchikey
+            from rgakit.molecule.utils import smiles_to_inchikey
             ik = smiles_to_inchikey(given["smiles"])
             if ik is None:
                 logger.debug("%s: could not compute InChIKey for %r",
@@ -310,6 +310,119 @@ class LocalSpectralDatabase:
                 f"No spectra found for query: {search_kwargs}"
             )
         return SpectraLibrary(spectra)
+
+    # ------------------------------------------------------------------
+    # Spectrum similarity search (brute-force cosine)
+    # ------------------------------------------------------------------
+
+    def search_by_spectrum(
+        self,
+        spectrum,
+        k:         int   = 10,
+        threshold: float = 0.3,
+    ) -> list[tuple]:
+        """
+        Find the *k* most similar spectra by cosine similarity.
+
+        Iterates over every spectrum in the database, projects it and
+        *spectrum* onto a common m/z grid, and ranks by cosine similarity.
+        Practical for databases up to ~100 k spectra (NIST ≈ 33 k takes
+        a few seconds).
+
+        Parameters
+        ----------
+        spectrum  : :class:`~rgakit.spectrum.MassSpectrum`
+        k         : number of results to return (default 10)
+        threshold : minimum cosine similarity to include (default 0.3)
+
+        Returns
+        -------
+        list of ``(MassSpectrum, float)`` tuples sorted by ascending
+        distance (``1 − cosine``), matching the interface of
+        :meth:`~rgakit.databases.InSilicoDatabase.search_by_spectrum`.
+        """
+        # Build query MassSpectrum vector on its own m/z grid
+        q_mz    = spectrum.mz.astype(int)
+        q_inten = spectrum.intensity.astype(float)
+        q_norm  = float(np.linalg.norm(q_inten))
+        if q_norm == 0:
+            return []
+        q_vec   = q_inten / q_norm
+        q_map   = {int(m): (i, v) for i, (m, v) in enumerate(zip(q_mz, q_vec))}
+
+        # Fetch all (rowid, mzs_blob, int_blob) from the database
+        sql = "SELECT rowid, mzs, intensities FROM spectra"
+        params: list = []
+        if self._source:
+            sql += " WHERE source = ?"
+            params.append(self._source)
+
+        rows    = self.conn.execute(sql, params).fetchall()
+        n_total = len(rows)
+        logger.info(
+            "%s.search_by_spectrum: scoring %d spectra …",
+            type(self).__name__, n_total,
+        )
+
+        # Score each spectrum against the query
+        scores: list[tuple[int, float]] = []   # (rowid, cosine)
+        for rowid, mzs_blob, int_blob in rows:
+            mz    = np.frombuffer(mzs_blob, dtype=np.float64)
+            inten = np.frombuffer(int_blob,  dtype=np.float64)
+            if inten.size == 0:
+                continue
+            norm = float(np.linalg.norm(inten))
+            if norm == 0:
+                continue
+            # Dot product only on shared m/z channels
+            dot = 0.0
+            for m, v in zip(mz, inten / norm):
+                pair = q_map.get(int(m))
+                if pair is not None:
+                    dot += pair[1] * v
+            if dot >= threshold:
+                scores.append((rowid, dot))
+
+        # Keep top-k by cosine (descending)
+        scores.sort(key=lambda x: x[1], reverse=True)
+        top = scores[:k]
+
+        # Fetch full rows for the winners
+        if not top:
+            logger.info("%s.search_by_spectrum: no hits above threshold.", type(self).__name__)
+            return []
+
+        placeholders = ",".join("?" * len(top))
+        rowids       = [t[0] for t in top]
+        cos_by_rowid = {t[0]: t[1] for t in top}
+
+        full_rows = self.conn.execute(
+            _SELECT + f" WHERE s.rowid IN ({placeholders})", rowids
+        ).fetchall()
+
+        row_by_id = {}
+        for row in full_rows:
+            spec = self._to_spectrum(row)
+            if spec is not None:
+                row_by_id[row[0]] = spec   # row[0] = s.id
+
+        # Match back to rowids (s.id may differ from rowid)
+        id_sql = f"SELECT rowid, id FROM spectra WHERE rowid IN ({placeholders})"
+        id_map = {r: sid for r, sid in self.conn.execute(id_sql, rowids).fetchall()}
+
+        results = []
+        for rowid, cos in top:
+            sid  = id_map.get(rowid)
+            spec = row_by_id.get(sid)
+            if spec is not None:
+                results.append((spec, 1.0 - cos))   # distance = 1 - cosine
+
+        logger.info(
+            "%s.search_by_spectrum: %d hits (best cosine %.4f).",
+            type(self).__name__, len(results),
+            1.0 - results[0][1] if results else 0,
+        )
+        return results
 
     def __len__(self) -> int:
         if self._source:

@@ -210,7 +210,7 @@ class MonaDatabase:
 
     @staticmethod
     def _inchikey(smiles: str) -> str | None:
-        from rgakit.molecule._utils import smiles_to_inchikey
+        from rgakit.molecule.utils import smiles_to_inchikey
         return smiles_to_inchikey(smiles)
 
     # ------------------------------------------------------------------

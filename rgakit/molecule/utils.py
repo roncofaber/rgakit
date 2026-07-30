@@ -1,5 +1,5 @@
 """
-_utils.py
+utils.py
 Stateless conversion and graph-utility functions for the molecule layer.
 
 All functions here are pure conversions between representations with no 3-D
@@ -17,17 +17,17 @@ Identifier conversions
     smiles_from_inchi   compute canonical SMILES from InChI (RDKit, local)
 
 SMILES property extraction
-    _monoisotopic_from_smiles  exact mass (Da) from SMILES
-    _formal_charge_from_smiles net formal charge from SMILES
+    monoisotopic_from_smiles  exact mass (Da) from SMILES
+    formal_charge_from_smiles net formal charge from SMILES
 
 RDKit Mol graph helpers
-    _adjacency               adjacency dict from RDKit Mol
-    _is_connected            check connectivity of an atom subset
-    _canonical_smiles_radical  canonical SMILES for an atom subset, with radical electrons on boundary atoms
+    adjacency               adjacency dict from RDKit Mol
+    is_connected            check connectivity of an atom subset
+    canonical_smiles_radical  canonical SMILES for an atom subset, with radical electrons on boundary atoms
 
 ASE Atoms graph helpers
-    atoms_to_graph           build a NetworkX Graph from ASE Atoms (public)
-    _extract_components      split ASE Atoms into connected components
+    atoms_to_graph          build a NetworkX Graph from ASE Atoms (public)
+    extract_components      split ASE Atoms into connected components
 """
 
 from __future__ import annotations
@@ -113,7 +113,7 @@ def smiles_from_inchi(inchi: str) -> str | None:
 # SMILES property extraction
 # ---------------------------------------------------------------------------
 
-def _monoisotopic_from_smiles(smiles: str) -> float | None:
+def monoisotopic_from_smiles(smiles: str) -> float | None:
     """Exact (monoisotopic) mass from a SMILES string via RDKit."""
     from rdkit import Chem
     from rdkit.Chem import rdMolDescriptors
@@ -125,7 +125,7 @@ def _monoisotopic_from_smiles(smiles: str) -> float | None:
     return rdMolDescriptors.CalcExactMolWt(mol)
 
 
-def _formal_charge_from_smiles(smiles: str) -> int:
+def formal_charge_from_smiles(smiles: str) -> int:
     """Net formal charge from a SMILES string via RDKit."""
     from rdkit import Chem
 
@@ -139,7 +139,7 @@ def _formal_charge_from_smiles(smiles: str) -> int:
 # RDKit Mol graph helpers
 # ---------------------------------------------------------------------------
 
-def _adjacency(mol) -> dict[int, set[int]]:
+def adjacency(mol) -> dict[int, set[int]]:
     """Build an adjacency dict {atom_idx: set(neighbour_idxs)} from an RDKit Mol."""
     adj: dict[int, set[int]] = {i: set() for i in range(mol.GetNumAtoms())}
     for bond in mol.GetBonds():
@@ -149,7 +149,7 @@ def _adjacency(mol) -> dict[int, set[int]]:
     return adj
 
 
-def _is_connected(subset: frozenset[int], adj: dict[int, set[int]]) -> bool:
+def is_connected(subset: frozenset[int], adj: dict[int, set[int]]) -> bool:
     """Return True if all atoms in *subset* form a single connected component."""
     if len(subset) <= 1:
         return True
@@ -164,10 +164,10 @@ def _is_connected(subset: frozenset[int], adj: dict[int, set[int]]) -> bool:
     return visited == subset
 
 
-
-def _canonical_smiles_radical(mol, subset: set[int]) -> str | None:
+def canonical_smiles_radical(mol, subset: set[int]) -> str | None:
     """
-    Like _canonical_smiles but marks unsatisfied valences as radical electrons.
+    Build a canonical SMILES for a fragment atom subset, marking unsatisfied
+    valences as radical electrons.
 
     Each bond cut during fragment extraction contributes its bond order to the
     radical electron count of the boundary atom, giving the correct spin state
@@ -243,7 +243,7 @@ def atoms_to_graph(atoms: Atoms, mult: float = 1.2) -> nx.Graph:
     return G
 
 
-def _extract_components(atoms: Atoms, bond_mult: float = 1.2) -> list[Atoms]:
+def extract_components(atoms: Atoms, bond_mult: float = 1.2) -> list[Atoms]:
     """
     Return one Atoms object per connected component of the bond graph.
 

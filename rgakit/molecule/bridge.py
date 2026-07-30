@@ -1,5 +1,5 @@
 """
-_bridge.py
+bridge.py
 Connects the molecule/fragmentation layer to the rgakit spectrum/library layer.
 
 Provides:
@@ -16,7 +16,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-def _enrich_spectrum(spec, frag):
+def enrich_spectrum(spec, frag):
     """
     Return a copy of *spec* with the fragment's own metadata filled in where
     the database left fields blank, and with a human-readable name when the
@@ -54,18 +54,18 @@ def fragment_to_spectrum(
     frag,
     nist_lookup:      bool  = False,
     formula_fallback: bool  = False,
-    db                      = None,
-    mb_db                   = None,
+    databases               = None,
 ):
     """
     Convert a Fragment to a MassSpectrum.
 
     Lookup order (each step only runs if the previous found nothing):
       1. Pre-loaded spectrum on the fragment (set by load_ms_spectra) — instant.
-      2. In-silico database (if *db* is provided) — fast, offline, by InChIKey.
-      3. MassBank REST API (if *mb_db* is provided) — online, by InChIKey.
-      4. NIST WebBook by InChIKey (only if *nist_lookup=True*; requires network).
-      5. NIST WebBook by formula (only if *formula_fallback=True*; ambiguous).
+      2. Each database in *databases* in order — first match wins.
+         All database types share the same ``.get(inchikey=...)`` interface:
+         InSilicoDatabase, MassBankDatabase, NistDatabase, MonaLocalDatabase, …
+      3. NIST WebBook by InChIKey (only if *nist_lookup=True*; requires network).
+      4. NIST WebBook by formula (only if *formula_fallback=True*; ambiguous).
 
     Returns None when all configured sources miss.  No theoretical fallback is
     generated — fragments without a real spectrum are simply skipped.
@@ -76,10 +76,19 @@ def fragment_to_spectrum(
     nist_lookup      : query NIST WebBook as a fallback (default False)
     formula_fallback : also try formula-based NIST search when InChIKey lookup
                        fails (default False, ambiguous — first isomer only)
-    db               : optional InSilicoDatabase; queried first (fast, offline)
-    mb_db            : optional MassBankDatabase; queried after in-silico
+    databases        : one database or a list of databases, queried in order
+                       (InSilicoDatabase, NistDatabase, MassBankDatabase,
+                       MonaLocalDatabase, …); all share the same interface
     """
-    from rgakit.molecule._utils import smiles_to_inchikey
+    from .utils import smiles_to_inchikey
+
+    # Normalise databases to a list (None → [], single db → [db]).
+    if databases is None:
+        _dbs = []
+    elif isinstance(databases, list):
+        _dbs = databases
+    else:
+        _dbs = [databases]
 
     # Step 1: return a pre-loaded spectrum immediately.
     if getattr(frag, "spectrum", None) is not None:
@@ -97,28 +106,23 @@ def fragment_to_spectrum(
         logger.debug("Could not compute InChIKey for %s (%s)",
                      frag.formula, frag.smiles)
 
-    # Step 2: in-silico database (local, no network).
-    if db is not None and inchikey is not None:
-        spec = db.get(inchikey=inchikey)
-        if spec is not None:
-            logger.info("In-silico hit: %s (%s)", frag.formula, frag.smiles)
-            return _enrich_spectrum(spec, frag)
+    # Step 2: query each database in order — first match wins.
+    if inchikey is not None:
+        for _db in _dbs:
+            spec = _db.get(inchikey=inchikey)
+            if spec is not None:
+                logger.info("%s hit: %s (%s)",
+                            type(_db).__name__, frag.formula, frag.smiles)
+                return enrich_spectrum(spec, frag)
 
-    # Step 3: MassBank REST API.
-    if mb_db is not None and inchikey is not None:
-        spec = mb_db.get(inchikey=inchikey)
-        if spec is not None:
-            logger.info("MassBank hit: %s (%s)", frag.formula, frag.smiles)
-            return _enrich_spectrum(spec, frag)
-
-    # Steps 4–5: NIST (explicit opt-in only).
+    # Steps 3–4: NIST (explicit opt-in only).
     if nist_lookup:
         if inchikey is not None:
             try:
                 from rgakit.spectrum import MassSpectrum
                 spec = MassSpectrum.from_nist(inchikey=inchikey)
                 logger.info("NIST hit: %s (%s)", frag.formula, frag.smiles)
-                return _enrich_spectrum(spec, frag)
+                return enrich_spectrum(spec, frag)
             except Exception as exc:
                 logger.debug("NIST miss for %s: %s", frag.smiles, exc)
 
@@ -131,7 +135,7 @@ def fragment_to_spectrum(
                     "verify this is the correct isomer.",
                     frag.formula, spec.name,
                 )
-                return _enrich_spectrum(spec, frag)
+                return enrich_spectrum(spec, frag)
             except Exception as exc:
                 logger.debug("NIST formula miss for %s: %s", frag.formula, exc)
 
@@ -140,7 +144,7 @@ def fragment_to_spectrum(
     return None
 
 
-def _nist_all_for_formula(formula: str) -> list:
+def nist_all_for_formula(formula: str) -> list:
     """
     Fetch every NIST EI-MS spectrum whose molecular formula matches *formula*.
 
@@ -199,8 +203,7 @@ def compound_to_library(
     formula_fallback: bool = False,
     formula_all:      bool = False,
     max_workers:      int  = 8,
-    db                     = None,
-    mb_db                  = None,
+    databases               = None,
 ):
     """
     Build a SpectraLibrary from the stable fragments of a Compound.
@@ -219,8 +222,9 @@ def compound_to_library(
     formula_all      : for NIST misses, add ALL NIST isomers sharing the same
                        molecular formula (default False)
     max_workers      : thread-pool size for concurrent lookups (default 8)
-    db               : optional InSilicoDatabase; queried first (fast, offline)
-    mb_db            : optional MassBankDatabase; queried after in-silico
+    databases        : one database or a list of databases, queried in order
+                       (InSilicoDatabase, NistDatabase, MassBankDatabase,
+                       MonaLocalDatabase, …); all share the same interface
 
     Returns
     -------
@@ -239,8 +243,7 @@ def compound_to_library(
         fragment_to_spectrum,
         nist_lookup      = nist_lookup,
         formula_fallback = formula_fallback,
-        db               = db,
-        mb_db            = mb_db,
+        databases        = databases,
     )
 
     n_workers = min(max_workers, len(frags)) if frags else 1
@@ -279,7 +282,7 @@ def compound_to_library(
         )
         n_workers2 = min(max_workers, len(unique_formulas))
         with ThreadPoolExecutor(max_workers=n_workers2) as pool:
-            formula_results = list(pool.map(_nist_all_for_formula, unique_formulas))
+            formula_results = list(pool.map(nist_all_for_formula, unique_formulas))
 
         for formula_spectra in formula_results:
             for spec in formula_spectra:

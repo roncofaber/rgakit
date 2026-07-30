@@ -58,7 +58,7 @@ _HNSW_SQL = """
     AND    s.hnsw_idx IN ({placeholders})
 """
 
-from rgakit.molecule._utils import smiles_to_inchikey, smiles_from_inchi  # noqa: E402
+from rgakit.molecule.utils import smiles_to_inchikey, smiles_from_inchi  # noqa: E402
 
 
 def _smiles_from_pubchem(identifier: str, namespace: str = "name") -> str | None:

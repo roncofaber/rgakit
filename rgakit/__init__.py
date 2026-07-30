@@ -12,8 +12,9 @@ from .report       import generate_report, plot_contributions, plot_stacked_spec
 from .nomenclature import normalize_nist_name, get_compound_info, resolve_name
 from .similarity   import score, pairwise
 from .background   import background_correct
-from .solvers      import make_solver, SUPPORTED_METHODS
-from .molecule     import Compound
+from .solvers         import make_solver, SUPPORTED_METHODS
+from .decomposition   import decompose, DecompositionResult
+from .molecule     import Compound, generate_fragment_wheel, generate_fragment_wheel_svg
 from .databases    import (InSilicoDatabase, MassBankDatabase,
                            MonaDatabase, MonaLocalDatabase, NistDatabase)
 
@@ -62,8 +63,12 @@ __all__ = [
     "background_correct",
     "make_solver",
     "SUPPORTED_METHODS",
+    "decompose",
+    "DecompositionResult",
     "setup_logging",
     "Compound",
+    "generate_fragment_wheel",
+    "generate_fragment_wheel_svg",
     "InSilicoDatabase",
     "MassBankDatabase",
     "MonaDatabase",
