@@ -358,6 +358,25 @@ class SpectraLibrary:
 
         self._spectra[spectrum.name] = spectrum
 
+    def remove_by_inchikey(self, inchikey: str) -> bool:
+        """
+        Remove a spectrum by InChIKey.
+
+        Parameters
+        ----------
+        inchikey : InChIKey of the spectrum to remove.
+
+        Returns
+        -------
+        True if a matching spectrum was found and removed, False otherwise.
+        """
+        for name, spec in list(self._spectra.items()):
+            ik = (getattr(spec, "metadata", {}) or {}).get("inchikey")
+            if ik == inchikey:
+                del self._spectra[name]
+                return True
+        return False
+
     @property
     def grid(self) -> np.ndarray:
         """Union of all m/z values across every library spectrum."""
