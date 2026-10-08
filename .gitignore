@@ -1,7 +1,33 @@
-dev/
+# Byte-compiled / cache
 __pycache__/
 *.py[cod]
+*$py.class
+.ipynb_checkpoints/
+.ruff_cache/
+
+# Packaging
 *.egg-info/
 dist/
 build/
 .eggs/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Tooling / editors
+.vscode/
+.idea/
+*.swp
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Project outputs and local dev
+dev/
+*.html
+*.log
+logs/

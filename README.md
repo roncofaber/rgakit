@@ -8,14 +8,26 @@ from X-ray irradiated perovskite thin films.
 
 ## Features
 
-- **NNLS fitting** — non-negative least-squares decomposition against a reference library
-- **Similarity metrics** — cosine, Jaccard, Pearson, spectral entropy; pairwise matrix for clustering
-- **Library search** — rank candidates by any similarity metric before NNLS fitting
-- **NIST library access** — fetch and cache spectra from NIST WebBook by name or CAS
-- **JDX & MSP I/O** — JCAMP-DX (round-trip with metadata) and NIST MSP (multi-entry files)
-- **Background correction** — linear subtraction using beam-off windows (via `clabs`)
-- **Interactive HTML report** — observed vs fitted, residual, contributions, stacked breakdown
-- **Smart naming** — common trivial names (Water, Methane, …) with IUPAC fallback via NCI Cactus
+- **NNLS and sparse fitting** - non-negative least-squares, LASSO, Elastic Net,
+  OMP and ROMP decomposition against a reference library
+- **Similarity metrics** - cosine, Jaccard, Pearson, spectral entropy; pairwise
+  matrix for clustering
+- **Library search** - rank candidates by any similarity metric before fitting
+- **Iterative library building** - grow a library compound by compound from a
+  spectral database until the residual is explained
+- **Reference databases** - local SQLite libraries (NIST, MoNA, FastEI
+  in-silico, ~2.25M spectra) plus REST clients for MassBank and MoNA
+- **Blind source separation** - NMF decomposition of time-resolved RGA data
+  into pure component spectra, matched against a database afterwards
+- **JDX & MSP I/O** - JCAMP-DX (round-trip with metadata) and NIST MSP
+  (multi-entry files)
+- **Background correction** - linear subtraction using beam-off shutter windows
+- **In-silico library generation** - SMILES-based fragment enumeration,
+  optional MLIP geometry relaxation, export to a fitting-ready library
+- **Interactive HTML report** - observed vs fitted, residual, contributions,
+  stacked breakdown
+- **Smart naming** - common trivial names (Water, Methane, ...) with IUPAC
+  fallback via NCI Cactus
 
 ## Install
 
@@ -37,7 +49,7 @@ ms = MassSpectrum.from_jdx_file("sample.jdx")
 # Candidate search (cosine, jaccard, pearson, or entropy)
 print(lib.search(ms, top_n=5, method="entropy"))
 
-# NNLS fit
+# NNLS fit (method="lasso" | "elastic_net" | "omp" | "romp" also supported)
 result = lib.fit(ms)
 result.summary()
 
@@ -48,6 +60,27 @@ generate_report(result, library=lib, spectrum=ms, output_path="report.html")
 # Pairwise similarity matrix (for clustering / classification)
 mat, names = pairwise(lib, method="cosine")
 # mat is a symmetric (N, N) ndarray; use with seaborn.heatmap or UMAP
+```
+
+### Building libraries from databases
+
+```python
+from rgakit import SpectraLibrary, NistDatabase, InSilicoDatabase, MassBankDatabase
+
+# Fetch spectra from NIST WebBook (name, CAS, or SMILES, cached locally)
+lib = SpectraLibrary.from_nist(names=["water", "methane", "methylammonium"])
+
+# Query a local SQLite spectral database
+nist = NistDatabase()                # or InSilicoDatabase() for FastEI (~2.25M spectra)
+spectra = nist.get("methylamine")
+matches = nist.search_by_spectrum(ms, k=10)
+
+# MassBank / MoNA via REST
+mb = MassBankDatabase()
+spectra = mb.get("propane")
+
+# Grow a library iteratively until the residual is explained
+lib, result = SpectraLibrary.from_fit(ms, nist, max_compounds=30)
 ```
 
 ### MSP format
@@ -63,6 +96,29 @@ ms = MassSpectrum.from_msp_file("nist_library.msp", index=3)
 ms.save_msp("output/water.msp")
 ```
 
+## Time-resolved data and NMF
+
+```python
+from rgakit import SpectrumStack, decompose, NistDatabase
+
+# Direct construction or clabs adapter
+stack = SpectrumStack(time, pressure, shutter=(open_time, close_time))
+# stack = SpectrumStack.from_rga(rga)
+
+stack = stack.background_correct(window=5, gap_before=2, gap_after=2)
+ms = stack.averaged()          # average over the shutter-open window
+
+# Blind source separation: P ~ W x H, no reference library needed
+decomp = decompose(stack, n_components=8, exclude_mz=[2, 18, 28], random_state=0)
+decomp.summary()
+decomp.plot_spectra()
+
+# Match the resolved pure spectra against a database
+nist = NistDatabase()
+for name, spectrum in decomp.to_library():
+    print(nist.search_by_spectrum(spectrum, k=5))
+```
+
 ## Workflow with clabs
 
 ```python
@@ -72,16 +128,55 @@ ms = MassSpectrum.from_rga(rga)
 ms.save_jdx("sample.jdx")
 ```
 
+## In-silico libraries from SMILES
+
+```python
+from rgakit.molecule import Compound
+
+# Fast workflow: SMILES-only fragmentation and recombination
+mol = Compound("CC(C)(C)OC(=O)CC[NH3+].[I-]", name="EAI")
+mol.do_fragmentation(max_heavy=6)   # enumerate + H-cap + radical bonding
+mol.do_recombination()              # pairwise SMILES-level recombination
+lib = mol.to_library()              # NIST lookup for each fragment
+
+# Optional physics-based refinement with an ASE-compatible MLIP calculator
+mol.relax(calc)
+mol.relax_fragments(calc, log_dir="logs/frags")
+mol.relax_recombination(calc, log_dir="logs/rec")
+
+# Visualise the fragmentation tree
+from rgakit.molecule import generate_fragment_wheel_svg
+generate_fragment_wheel_svg(mol, "eai_wheel.svg")
+```
+
 ## File structure
 
 ```
 rgakit/
-  spectrum.py     — MassSpectrum (JDX, MSP, txt I/O; similarity_score / cosine_similarity; from_rga)
-  library.py      — SpectraLibrary (NNLS fit, search, from_dir/from_msp)
-  result.py       — FitResult (summary table, plot)
-  similarity.py   — cosine / jaccard / pearson / entropy; pairwise matrix
-  nomenclature.py — name resolution (common names → Cactus IUPAC → NIST)
-  report.py       — interactive HTML report generation
-  background.py   — standalone linear background correction
+  core modules
+    spectrum.py       MassSpectrum (JDX, MSP, txt I/O; similarity; from_rga)
+    library.py        SpectraLibrary (fit, search, from_fit, fit_time_series, fit_bootstrap)
+    result.py         FitResult / TimeFitResult (summary tables, plots)
+    stack.py          SpectrumStack (time-resolved data, shutter windows, background correction)
+    decomposition.py  NMF blind source separation (decompose, DecompositionResult)
+    similarity.py     cosine / jaccard / pearson / entropy; pairwise matrix
+    background.py     standalone linear background correction
+    nomenclature.py   name resolution (trivial names, Cactus IUPAC, NIST)
+    report.py         interactive HTML report generation
+    chemutils.py      shared chemical utilities
+  solvers/            nnls, lasso, elastic_net, omp, romp via make_solver()
+  io/                 JCAMP-DX (jdx) and NIST MSP (msp) parsers and writers
+  molecule/           Compound, fragment enumeration, MLIP relaxation, recombination,
+                      fragment wheels (matplotlib / SVG)
+  databases/          NistDatabase, InSilicoDatabase, MonaDatabase, MonaLocalDatabase,
+                      MassBankDatabase, LocalSpectralDatabase (SQLite base class)
 ```
 
+## Logging
+
+rgakit logs are silent by default. Call `rgakit.setup_logging()` at the top of
+a script or notebook to see progress, warnings, and errors on the console.
+
+## License
+
+MIT
