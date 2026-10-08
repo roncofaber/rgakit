@@ -199,16 +199,32 @@ def save_decisions(path, dec: dict) -> None:
 
 
 def apply_decisions(libraries, decisions_path, *, verdict: str = "remove",
+                    mode: str = "blacklist",
                     background_names: Iterable[str] = DEFAULT_BACKGROUND) -> SpectraLibrary:
     """
     Build a curated SpectraLibrary from libraries and a decisions JSON file.
 
-    Compounds whose recorded verdict matches *verdict* are dropped.
+    Parameters
+    ----------
+    mode : "blacklist" drops compounds whose recorded verdict matches
+        *verdict*; undecided compounds are kept. "whitelist" keeps only
+        compounds whose verdict is *not* *verdict* (i.e. explicitly kept
+        when verdict="remove"); undecided compounds are dropped.
     """
     dec = load_decisions(decisions_path)
-    spectra = [s for s in _iter_spectra(libraries)
-               if dec.get(s.metadata.get("inchikey"), {}).get("verdict") != verdict]
+    if mode == "blacklist":
+        spectra = [s for s in _iter_spectra(libraries)
+                   if dec.get(s.metadata.get("inchikey"), {}).get("verdict") != verdict]
+    elif mode == "whitelist":
+        spectra = [s for s in _iter_spectra(libraries)
+                   if dec.get(s.metadata.get("inchikey"), {}).get("verdict") == _opposite(verdict)]
+    else:
+        raise ValueError(f"Unknown mode {mode!r} (use 'blacklist' or 'whitelist')")
     return SpectraLibrary(spectra)
+
+
+def _opposite(verdict: str) -> str:
+    return "keep" if verdict == "remove" else "remove"
 
 
 #%% HTTP server

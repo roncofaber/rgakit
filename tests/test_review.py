@@ -50,7 +50,9 @@ def test_build_candidates_weights_stats():
 def test_decisions_roundtrip_and_apply(tmp_path):
     path = tmp_path / "decisions.json"
     dec = {"IK1": {"name": "Nitrogen", "verdict": "remove",
-                   "reason": "test", "decided_at": "2026-01-01"}}
+                   "reason": "test", "decided_at": "2026-01-01"},
+           "IK2": {"name": "Ethane", "verdict": "keep",
+                   "reason": "", "decided_at": "2026-01-01"}}
     save_decisions(path, dec)
     assert load_decisions(path) == dec
 
@@ -63,4 +65,9 @@ def test_decisions_roundtrip_and_apply(tmp_path):
     assert len(curated) == 1
 
     kept = apply_decisions(lib, path, verdict="keep")
-    assert len(kept) == 2 and "Nitrogen" in kept.names()
+    assert len(kept) == 1 and "Nitrogen" in kept.names()
+
+    allowed = apply_decisions(lib, path, mode="whitelist")
+    assert "Nitrogen" not in allowed.names()
+    assert "Ethane" in allowed.names()
+    assert len(allowed) == 1
