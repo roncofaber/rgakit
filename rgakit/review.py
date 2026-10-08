@@ -10,10 +10,10 @@ statistics.
 
     launch_review("data/libraries/", decisions_path="decisions.json")
 
-Browser keys: y = keep, n = remove, s/space = skip, arrows = navigate,
-u = undo last decision. Each decision is saved immediately to the decisions
-JSON file. Once the review is done, build the curated library with
-``apply_decisions``.
+Browser keys: y = keep, n = remove (then Enter confirms, Esc cancels),
+s/space = skip, arrows = navigate, u = undo last decision. Each decision is
+saved immediately to the decisions JSON file. Once the review is done, build
+the curated library with ``apply_decisions``.
 """
 
 from __future__ import annotations
@@ -159,7 +159,11 @@ def _mol_svg(smiles: str) -> str | None:
     if mol is None:
         return None
     d = rdMolDraw2D.MolDraw2DSVG(340, 340)
-    d.drawOptions().bondLineWidth = 2
+    o = d.drawOptions()
+    o.backgroundColour = (0.09, 0.10, 0.13, 1.0)
+    o.bondLineWidth = 2
+    o.padding = 0.12
+    o.updateAtomPalette({6: (0.85, 0.87, 0.92), 1: (0.60, 0.62, 0.66)})
     rdMolDraw2D.PrepareAndDrawMolecule(d, mol)
     d.FinishDrawing()
     return d.GetDrawingText()
@@ -304,27 +308,33 @@ PAGE = r"""<!DOCTYPE html>
 <meta charset="utf-8">
 <title>Compound curation review</title>
 <style>
-  :root { --bg:#16181d; --card:#1f232b; --fg:#d7dae0; --dim:#8a919c;
-          --keep:#4caf7d; --rem:#e06c6c; --acc:#61afef; }
+  :root { --bg:#16181d; --card:#1f232b; --panel:#171a20; --fg:#d7dae0;
+          --dim:#8a919c; --keep:#4caf7d; --rem:#e06c6c; --acc:#61afef;
+          --peak:#53d6e8; }
   * { box-sizing: border-box; }
   body { background: var(--bg); color: var(--fg); margin: 0;
          font: 15px/1.45 -apple-system, "Segoe UI", sans-serif; }
-  header { display: flex; align-items: center; gap: 16px; padding: 10px 18px;
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 18px 8px;
            background: var(--card); border-bottom: 1px solid #2c313a;
-           position: sticky; top: 0; z-index: 5; }
+           position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
   header h1 { font-size: 16px; margin: 0; font-weight: 600; }
   #progress { color: var(--dim); font-variant-numeric: tabular-nums; }
-  label.tog { color: var(--dim); cursor: pointer; user-select: none; }
   .spacer { flex: 1; }
-  main { display: flex; gap: 22px; padding: 22px; max-width: 1100px; margin: 0 auto; }
-  .struct { flex: 0 0 360px; background: #fff; border-radius: 10px;
-            min-height: 360px; display: flex; align-items: center;
-            justify-content: center; }
+  label.tog { color: var(--dim); cursor: pointer; user-select: none; }
+  #pbar { width: 100%; height: 3px; background: #262b34; border-radius: 2px;
+          margin-top: 2px; }
+  #pfill { height: 100%; width: 0%; background: var(--acc); border-radius: 2px;
+           transition: width .3s; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 22px; }
+  .row1 { display: flex; gap: 22px; }
+  .struct { flex: 0 0 340px; background: var(--panel); border: 1px solid #2c313a;
+            border-radius: 10px; min-height: 340px; display: flex;
+            align-items: center; justify-content: center; overflow: hidden; }
   .struct svg { max-width: 100%; }
-  .struct .none { color: #666; padding: 20px; text-align: center; }
-  .info { flex: 1; }
-  .info h2 { margin: 0 0 2px; font-size: 22px; }
-  .badges { margin: 6px 0 12px; }
+  .struct .none { color: var(--dim); padding: 20px; text-align: center; }
+  .info { flex: 1; min-width: 0; }
+  .info h2 { margin: 0 0 4px; font-size: 22px; }
+  .badges { margin: 6px 0 14px; }
   .badge { display: inline-block; padding: 2px 9px; border-radius: 20px;
            font-size: 12px; margin-right: 6px; background: #2c313a; color: var(--dim); }
   .badge.bg   { background: #3a3325; color: #d9b96c; }
@@ -332,28 +342,41 @@ PAGE = r"""<!DOCTYPE html>
   .badge.seen { background: #2c3a2c; color: var(--keep); }
   .badge.kept { background: #1e4030; color: var(--keep); }
   .badge.rem  { background: #40262a; color: var(--rem); }
-  dl { display: grid; grid-template-columns: 130px 1fr; gap: 3px 12px; margin: 0 0 14px; }
-  dt { color: var(--dim); } dd { margin: 0; }
-  code { font: 13px/1.5 ui-monospace, Menlo, monospace; color: #b8c4d4;
-         background: #262b34; padding: 6px 9px; border-radius: 6px;
-         display: inline-block; word-break: break-all; }
-  #reason { width: 100%; background: #262b34; color: var(--fg); border: 1px solid #333a45;
-            border-radius: 6px; padding: 7px 10px; margin: 10px 0 14px; }
+  .badge.pending { background: #40262a; color: var(--rem); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .55; } }
+  dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 4px 14px;
+       margin: 0 0 16px; align-items: baseline; }
+  dt { color: var(--dim); text-align: right; }
+  dd { margin: 0; min-width: 0; }
+  dd code { font: 13px/1.5 ui-monospace, Menlo, monospace; color: #b8c4d4;
+            background: #262b34; padding: 5px 9px; border-radius: 6px;
+            display: inline-block; word-break: break-all; max-width: 100%; }
+  .stats { display: flex; gap: 26px; margin: 0 0 16px; padding: 10px 14px;
+           background: var(--panel); border: 1px solid #2c313a; border-radius: 8px; }
+  .stats .st { display: flex; flex-direction: column; }
+  .stats .st b { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .stats .st span { color: var(--dim); font-size: 12px; }
+  .stats .st.warn b { color: var(--dim); }
+  #reason { width: 100%; background: #2a303b; color: var(--fg); border: 1px solid #3d4655;
+            border-radius: 6px; padding: 7px 10px; margin: 0 0 12px; }
+  #reason:focus { outline: none; border-color: var(--rem); }
   .btns { display: flex; gap: 12px; }
-  button { font-size: 15px; padding: 10px 22px; border-radius: 8px; cursor: pointer;
+  button { font-size: 15px; padding: 10px 20px; border-radius: 8px; cursor: pointer;
            border: 1px solid #3a4150; background: #262b34; color: var(--fg); }
   button:hover { filter: brightness(1.2); }
   button.keep { background: #1e4030; border-color: var(--keep); }
   button.rem  { background: #40262a; border-color: var(--rem); }
-  button:disabled { opacity: .4; cursor: default; }
-  #spectrum { width: 100%; height: 190px; margin-top: 16px; }
+  #spectrumbox { margin-top: 18px; background: var(--panel); border: 1px solid #2c313a;
+                  border-radius: 10px; padding: 10px 12px 6px; }
+  #spectrum { width: 100%; height: 260px; display: block; }
   #status { position: fixed; bottom: 14px; right: 18px; color: var(--dim);
             font-size: 13px; }
   .done { margin: 80px auto; text-align: center; }
   .done h2 { font-size: 26px; }
-  kbd { background: #2c313a; padding: 1px 7px; border-radius: 4px;
-        border: 1px solid #3a4150; font-size: 12px; }
-  #help { color: var(--dim); font-size: 13px; margin-top: 14px; }
+  @media (max-width: 900px) {
+    .row1 { flex-direction: column; }
+    .struct { flex: none; }
+  }
 </style>
 </head>
 <body>
@@ -362,13 +385,14 @@ PAGE = r"""<!DOCTYPE html>
   <span id="progress"></span>
   <div class="spacer"></div>
   <label class="tog"><input type="checkbox" id="tog" checked> only undecided</label>
-  <button id="undo" title="u">Undo</button>
+  <button id="undo" title="u">Undo (u)</button>
+  <div id="pbar"><div id="pfill"></div></div>
 </header>
 <main id="main"></main>
 <div id="status"></div>
 <script>
 let comps = [], dec = {}, idx = 0, onlyUndecided = true;
-let bgNames = [];
+let bgNames = [], pending = null;
 const detailCache = {};
 let renderToken = 0;
 
@@ -386,9 +410,14 @@ async function init() {
 }
 
 function onKey(e) {
-  if (e.target.tagName === 'INPUT' && e.target.type === 'text') return;
+  const typing = e.target.tagName === 'INPUT' && e.target.type === 'text';
+  if (typing) {
+    if (e.key === 'Enter' && pending) submitPending();
+    else if (e.key === 'Escape' && pending) { pending = null; render(); }
+    return;
+  }
   if (e.key === 'y' || e.key === 'Y') decide('keep');
-  else if (e.key === 'n' || e.key === 'N') decide('remove');
+  else if (e.key === 'n' || e.key === 'N') startRemove();
   else if (e.key === 's' || e.key === ' ' || e.key === 'ArrowRight') next(1);
   else if (e.key === 'ArrowLeft') next(-1);
   else if (e.key === 'u' || e.key === 'U') undo();
@@ -411,7 +440,19 @@ async function decide(verdict) {
     body: JSON.stringify({inchikey: ik, verdict, reason})
   });
   dec[ik] = {verdict};
+  pending = null;
   render();
+}
+
+function startRemove() {
+  pending = 'remove';
+  render();
+  document.getElementById('reason')?.focus();
+}
+
+async function submitPending() {
+  if (!pending) return;
+  await decide(pending);
 }
 
 async function undo() {
@@ -430,6 +471,8 @@ async function render() {
   const done = comps.filter(c => dec[c.inchikey]).length;
   document.getElementById('progress').textContent =
     `${done} decided / ${comps.length}`;
+  document.getElementById('pfill').style.width =
+    `${100 * done / Math.max(comps.length, 1)}%`;
 
   const main = document.getElementById('main');
   if (!f.length) {
@@ -444,35 +487,45 @@ async function render() {
   idx = Math.min(idx, f.length - 1);
   const c = comps.find(x => x.inchikey === f[idx]);
   const d = dec[c.inchikey];
+  const badges = [
+    isBackground(c) ? '<span class="badge bg">background</span>'
+                    : '<span class="badge prod">product</span>',
+    c.n_samples ? '<span class="badge seen">seen in fits</span>'
+                : '<span class="badge">never fitted</span>',
+  ];
+  if (pending === 'remove') badges.push('<span class="badge pending">REMOVE - Enter to confirm, Esc to cancel</span>');
+  else if (d?.verdict === 'keep') badges.push('<span class="badge kept">marked: KEEP</span>');
+  else if (d?.verdict === 'remove') badges.push('<span class="badge rem">marked: REMOVE</span>');
+
+  const fmt = v => v ? v.toExponential(2) : '—';
   main.innerHTML = `
-    <div class="struct" id="struct"><span class="none">loading…</span></div>
-    <div class="info">
-      <h2>${esc(c.name)}</h2>
-      <div class="badges">
-        ${isBackground(c) ? '<span class="badge bg">background</span>' : '<span class="badge prod">product</span>'}
-        ${c.n_samples ? '<span class="badge seen">seen in fits</span>' : '<span class="badge">never fitted</span>'}
-        ${d ? (d.verdict === 'keep' ? '<span class="badge kept">marked: KEEP</span>'
-                                    : '<span class="badge rem">marked: REMOVE</span>') : ''}
+    <div class="row1">
+      <div class="struct" id="struct"><span class="none">loading…</span></div>
+      <div class="info">
+        <h2>${esc(c.name)}</h2>
+        <div class="badges">${badges.join('')}</div>
+        <dl>
+          <dt>Formula</dt><dd>${esc(c.formula)}</dd>
+          <dt>CAS</dt><dd>${esc(c.cas || '—')}</dd>
+          <dt>MW</dt><dd>${c.mw ?? '—'}</dd>
+          <dt>SMILES</dt><dd><code>${esc(c.smiles)}</code></dd>
+          <dt>InChIKey</dt><dd>${esc(c.inchikey)}</dd>
+        </dl>
+        <div class="stats">
+          <div class="st ${c.n_samples ? '' : 'warn'}"><b>${c.n_samples}</b><span>samples fitted</span></div>
+          <div class="st ${c.n_samples ? '' : 'warn'}"><b>${c.n_samples ? fmt(c.mean_w) : '—'}</b><span>mean weight</span></div>
+          <div class="st ${c.n_samples ? '' : 'warn'}"><b>${c.n_samples ? fmt(c.max_w) : '—'}</b><span>max weight</span></div>
+        </div>
+        <input id="reason" type="text" placeholder="reason (optional) - Enter confirms a removal">
+        <div class="btns">
+          <button class="keep" onclick="decide('keep')">Keep (y)</button>
+          <button class="rem"  onclick="startRemove()">Remove (n)</button>
+          <button onclick="next(1)">Skip (s)</button>
+          <button onclick="next(-1)">Prev (←)</button>
+        </div>
       </div>
-      <dl>
-        <dt>Formula</dt><dd>${esc(c.formula)}</dd>
-        <dt>CAS</dt><dd>${esc(c.cas || '—')}</dd>
-        <dt>MW</dt><dd>${c.mw ?? '—'}</dd>
-        <dt>Samples fitted</dt><dd>${c.n_samples} (mean w = ${c.mean_w ? c.mean_w.toExponential(2) : '—'}, max = ${c.max_w ? c.max_w.toExponential(2) : '—'})</dd>
-        <dt>InChIKey</dt><dd>${esc(c.inchikey)}</dd>
-      </dl>
-      <code>${esc(c.smiles)}</code>
-      <input id="reason" type="text" placeholder="reason (optional)">
-      <div class="btns">
-        <button class="keep" onclick="decide('keep')">Keep (y)</button>
-        <button class="rem"  onclick="decide('remove')">Remove (n)</button>
-        <button onclick="next(1)">Skip (s)</button>
-        <button onclick="next(-1)">Back (←)</button>
-      </div>
-      <div id="help"><kbd>y</kbd> keep · <kbd>n</kbd> remove · <kbd>s</kbd>/space skip ·
-        <kbd>←</kbd>/<kbd>→</kbd> navigate · <kbd>u</kbd> undo</div>
-      <canvas id="spectrum" width="700" height="190"></canvas>
-    </div>`;
+    </div>
+    <div id="spectrumbox"><canvas id="spectrum" width="1040" height="260"></canvas></div>`;
   document.getElementById('status').textContent = `${idx + 1} / ${f.length}`;
 
   if (!detailCache[c.inchikey]) {
@@ -499,23 +552,34 @@ function drawSpectrum(sp) {
   const cv = document.getElementById('spectrum');
   if (!cv || !sp.mz.length) return;
   const ctx = cv.getContext('2d');
-  const W = cv.width, H = cv.height, padL = 34, padB = 22, padT = 8;
-  ctx.fillStyle = '#1b1e24'; ctx.fillRect(0, 0, W, H);
+  const W = cv.width, H = cv.height, padL = 44, padR = 10, padB = 34, padT = 10;
+  ctx.fillStyle = '#14161b'; ctx.fillRect(0, 0, W, H);
   const mzMax = Math.max(20, Math.ceil(Math.max(...sp.mz) / 10) * 10);
-  const X = m => padL + (m / mzMax) * (W - padL - 6);
+  const X = m => padL + (m / mzMax) * (W - padL - padR);
   const Y = r => H - padB - r * (H - padB - padT);
-  ctx.strokeStyle = '#2c313a'; ctx.fillStyle = '#8a919c';
-  ctx.font = '11px sans-serif'; ctx.lineWidth = 1;
+  ctx.strokeStyle = '#2c313a'; ctx.fillStyle = '#a8b0bb';
+  ctx.font = '12px sans-serif'; ctx.lineWidth = 1;
   for (let t = 0; t <= mzMax; t += mzMax > 150 ? 50 : 20) {
     ctx.beginPath(); ctx.moveTo(X(t), padT); ctx.lineTo(X(t), H - padB); ctx.stroke();
-    ctx.fillText(t, X(t) - 8, H - 6);
+    ctx.fillText(t, X(t) - 8, H - padB + 16);
   }
-  ctx.fillText('rel.', 4, padT + 10);
-  ctx.strokeStyle = '#61afef'; ctx.lineWidth = 1.6;
+  ctx.fillText('1.0', 12, padT + 4);
+  ctx.fillText('0.5', 12, (H - padB + padT) / 2 + 4);
+  ctx.beginPath(); ctx.moveTo(padL, Y(0.5)); ctx.lineTo(W - padR, Y(0.5));
+  ctx.setLineDash([3, 4]); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillText('m/z', (padL + W) / 2 - 12, H - 4);
+  ctx.save();
+  ctx.translate(12, (H - padB + padT) / 2 - 10);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('rel. intensity', 0, 0);
+  ctx.restore();
+  ctx.strokeStyle = '#53d6e8'; ctx.lineWidth = 2.2;
+  ctx.beginPath();
   for (let i = 0; i < sp.mz.length; i++) {
-    ctx.beginPath(); ctx.moveTo(X(sp.mz[i]), H - padB);
-    ctx.lineTo(X(sp.mz[i]), Y(sp.rel[i])); ctx.stroke();
+    ctx.moveTo(X(sp.mz[i]), H - padB);
+    ctx.lineTo(X(sp.mz[i]), Y(sp.rel[i]));
   }
+  ctx.stroke();
 }
 
 init();
