@@ -14,6 +14,7 @@ from .similarity   import score, pairwise
 from .background   import background_correct
 from .solvers         import make_solver, SUPPORTED_METHODS
 from .decomposition   import decompose, DecompositionResult
+from .review          import launch_review, build_candidates, apply_decisions
 from .molecule     import Compound, generate_fragment_wheel, generate_fragment_wheel_svg
 from .databases    import (InSilicoDatabase, MassBankDatabase,
                            MonaDatabase, MonaLocalDatabase, NistDatabase)
@@ -22,7 +23,7 @@ from .databases    import (InSilicoDatabase, MassBankDatabase,
 # unless the calling application configures logging.
 logging.getLogger("rgakit").addHandler(logging.NullHandler())
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -65,6 +66,9 @@ __all__ = [
     "SUPPORTED_METHODS",
     "decompose",
     "DecompositionResult",
+    "launch_review",
+    "build_candidates",
+    "apply_decisions",
     "setup_logging",
     "Compound",
     "generate_fragment_wheel",

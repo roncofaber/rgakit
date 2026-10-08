@@ -30,6 +30,9 @@ dependencies = [
 [project.optional-dependencies]
 search = ["hnswlib", "gensim>=4.1"]
 
+[project.scripts]
+rgakit-review = "rgakit.review:cli_main"
+
 [project.urls]
 Repository  = "https://github.com/roncofaber/rgakit"
 "Bug Tracker" = "https://github.com/roncofaber/rgakit/issues"

@@ -26,6 +26,8 @@ from X-ray irradiated perovskite thin films.
   optional MLIP geometry relaxation, export to a fitting-ready library
 - **Interactive HTML report** - observed vs fitted, residual, contributions,
   stacked breakdown
+- **Interactive curation review** - local web app to review candidate compounds
+  one by one (structure, spectrum, stats) and record keep/remove verdicts
 - **Smart naming** - common trivial names (Water, Methane, ...) with IUPAC
   fallback via NCI Cactus
 
@@ -119,6 +121,33 @@ for name, spectrum in decomp.to_library():
     print(nist.search_by_spectrum(spectrum, k=5))
 ```
 
+## Interactive compound curation
+
+Review the union of your libraries one compound at a time in the browser,
+recording keep/remove verdicts:
+
+```python
+from rgakit import launch_review, apply_decisions
+
+# Review all .pkl libraries in a folder; weights add occurrence statistics
+launch_review("data/libraries/",
+              weights={"Ethane": [0.0, 0.1, 0.3]},
+              decisions_path="decisions.json")
+
+# Then build the curated library from the recorded verdicts
+lib = apply_decisions("data/libraries/", "decisions.json")
+```
+
+Or from the command line:
+
+```bash
+rgakit-review data/libraries/ -d decisions.json --stats stats.csv
+```
+
+Keys in the browser: `y` keep, `n` remove, `s`/space skip, arrows navigate,
+`u` undo. Each decision is saved immediately and the review resumes where you
+left off.
+
 ## Workflow with clabs
 
 ```python
@@ -163,6 +192,7 @@ rgakit/
     background.py     standalone linear background correction
     nomenclature.py   name resolution (trivial names, Cactus IUPAC, NIST)
     report.py         interactive HTML report generation
+    review.py         interactive compound curation review (local web app)
     chemutils.py      shared chemical utilities
   solvers/            nnls, lasso, elastic_net, omp, romp via make_solver()
   io/                 JCAMP-DX (jdx) and NIST MSP (msp) parsers and writers
