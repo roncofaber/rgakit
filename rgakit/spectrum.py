@@ -43,14 +43,25 @@ class MassSpectrum:
         metadata:  dict | None = None,
         jdx_text:  str | None = None,
     ):
-        self.mz        = np.asarray(mz, dtype=int)
-        self.intensity = np.asarray(intensity, dtype=float)
+        mz_arr        = np.rint(np.asarray(mz, dtype=float)).astype(int)
+        intensity_arr = np.asarray(intensity, dtype=float)
+
+        if len(mz_arr) != len(intensity_arr):
+            raise ValueError("mz and intensity must have the same length.")
+
+        # Rounding (or an upstream source) can map two distinct peaks onto the
+        # same nominal m/z channel — sum them so each channel is unique.
+        if len(mz_arr) != len(np.unique(mz_arr)):
+            uniq_mz, inverse = np.unique(mz_arr, return_inverse=True)
+            summed = np.zeros(len(uniq_mz), dtype=float)
+            np.add.at(summed, inverse, intensity_arr)
+            mz_arr, intensity_arr = uniq_mz, summed
+
+        self.mz        = mz_arr
+        self.intensity = intensity_arr
         self.name      = name
         self.metadata  = metadata or {}
         self._jdx_text = jdx_text
-
-        if len(self.mz) != len(self.intensity):
-            raise ValueError("mz and intensity must have the same length.")
 
     # ------------------------------------------------------------------
     # Typed metadata properties

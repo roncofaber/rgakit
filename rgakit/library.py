@@ -232,7 +232,13 @@ class SpectraLibrary:
             if inside / total_inten < min_overlap:
                 continue
 
-            top_idx = np.argsort(-inten)[:2]
+            # Rank peaks by intensity within the measured m/z range only —
+            # a compound's two largest peaks overall may fall outside the
+            # instrument's range even when its in-range peaks fit well.
+            in_range = [j for j, m in enumerate(mz) if int(m) in obs_mz_set]
+            if not in_range:
+                continue
+            top_idx = sorted(in_range, key=lambda j: -inten[j])[:2]
             top_mz  = [int(mz[j]) for j in top_idx]
             if not any(m in obs_signal_mz for m in top_mz):
                 continue

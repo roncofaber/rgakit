@@ -35,8 +35,8 @@ Repository  = "https://github.com/roncofaber/rgakit"
 "Bug Tracker" = "https://github.com/roncofaber/rgakit/issues"
 Changelog   = "https://github.com/roncofaber/rgakit/releases"
 
-[tool.setuptools]
-packages = ["rgakit", "rgakit.molecule", "rgakit.databases"]
+[tool.setuptools.packages.find]
+include = ["rgakit*"]
 
 [tool.setuptools.dynamic]
 version = {attr = "rgakit.__version__"}

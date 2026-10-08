@@ -22,6 +22,7 @@ _JDX_FIELDS = {
     "mw":      re.compile(r"##MW[^\S\r\n]*=[^\S\r\n]*(.+)",              re.IGNORECASE),
 }
 _USER_FIELD_RE = re.compile(r"^##\$([^=]+)=(.+)", re.MULTILINE)
+_YFACTOR_RE    = re.compile(r"##YFACTOR[^\S\r\n]*=[^\S\r\n]*([\d.eE+-]+)", re.IGNORECASE)
 
 # RGA-specific metadata keys preserved in JDX round-trips
 RGA_META_KEYS = (
@@ -66,8 +67,11 @@ def parse_jdx(jdx_text: str) -> tuple[np.ndarray, np.ndarray, dict]:
     if not pairs:
         raise ValueError("Peak table is empty.")
 
+    yfactor_match = _YFACTOR_RE.search(jdx_text)
+    yfactor       = float(yfactor_match.group(1)) if yfactor_match else 1.0
+
     mz        = np.array([int(m)   for m, _ in pairs], dtype=int)
-    intensity = np.array([float(i) for _, i in pairs], dtype=float)
+    intensity = np.array([float(i) for _, i in pairs], dtype=float) * yfactor
     return mz, intensity, metadata
 
 
