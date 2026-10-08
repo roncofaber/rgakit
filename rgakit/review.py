@@ -10,9 +10,10 @@ statistics.
 
     launch_review("data/libraries/", decisions_path="decisions.json")
 
-Browser keys: y = keep, n = remove (then Enter confirms, Esc cancels),
-s/space = skip, arrows = navigate, u = undo last decision. Each decision is
-saved immediately to the decisions JSON file. Once the review is done, build
+Browser keys: y = keep, n = remove, s/space = skip, arrows = navigate,
+u = undo last decision. The reason field is optional: type a reason and
+press Enter, or just press n to remove without one. Each decision is saved
+immediately to the decisions JSON file. Once the review is done, build
 the curated library with ``apply_decisions``.
 """
 
@@ -342,8 +343,6 @@ PAGE = r"""<!DOCTYPE html>
   .badge.seen { background: #2c3a2c; color: var(--keep); }
   .badge.kept { background: #1e4030; color: var(--keep); }
   .badge.rem  { background: #40262a; color: var(--rem); }
-  .badge.pending { background: #40262a; color: var(--rem); animation: pulse 1s infinite; }
-  @keyframes pulse { 50% { opacity: .55; } }
   dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 4px 14px;
        margin: 0 0 16px; align-items: baseline; }
   dt { color: var(--dim); text-align: right; }
@@ -392,7 +391,7 @@ PAGE = r"""<!DOCTYPE html>
 <div id="status"></div>
 <script>
 let comps = [], dec = {}, idx = 0, onlyUndecided = true;
-let bgNames = [], pending = null;
+let bgNames = [];
 const detailCache = {};
 let renderToken = 0;
 
@@ -412,12 +411,11 @@ async function init() {
 function onKey(e) {
   const typing = e.target.tagName === 'INPUT' && e.target.type === 'text';
   if (typing) {
-    if (e.key === 'Enter' && pending) submitPending();
-    else if (e.key === 'Escape' && pending) { pending = null; render(); }
+    if (e.key === 'Enter') decide('remove');
     return;
   }
   if (e.key === 'y' || e.key === 'Y') decide('keep');
-  else if (e.key === 'n' || e.key === 'N') startRemove();
+  else if (e.key === 'n' || e.key === 'N') decide('remove');
   else if (e.key === 's' || e.key === ' ' || e.key === 'ArrowRight') next(1);
   else if (e.key === 'ArrowLeft') next(-1);
   else if (e.key === 'u' || e.key === 'U') undo();
@@ -440,19 +438,7 @@ async function decide(verdict) {
     body: JSON.stringify({inchikey: ik, verdict, reason})
   });
   dec[ik] = {verdict};
-  pending = null;
   render();
-}
-
-function startRemove() {
-  pending = 'remove';
-  render();
-  document.getElementById('reason')?.focus();
-}
-
-async function submitPending() {
-  if (!pending) return;
-  await decide(pending);
 }
 
 async function undo() {
@@ -493,8 +479,7 @@ async function render() {
     c.n_samples ? '<span class="badge seen">seen in fits</span>'
                 : '<span class="badge">never fitted</span>',
   ];
-  if (pending === 'remove') badges.push('<span class="badge pending">REMOVE - Enter to confirm, Esc to cancel</span>');
-  else if (d?.verdict === 'keep') badges.push('<span class="badge kept">marked: KEEP</span>');
+  if (d?.verdict === 'keep') badges.push('<span class="badge kept">marked: KEEP</span>');
   else if (d?.verdict === 'remove') badges.push('<span class="badge rem">marked: REMOVE</span>');
 
   const fmt = v => v ? v.toExponential(2) : '—';
@@ -516,10 +501,10 @@ async function render() {
           <div class="st ${c.n_samples ? '' : 'warn'}"><b>${c.n_samples ? fmt(c.mean_w) : '—'}</b><span>mean weight</span></div>
           <div class="st ${c.n_samples ? '' : 'warn'}"><b>${c.n_samples ? fmt(c.max_w) : '—'}</b><span>max weight</span></div>
         </div>
-        <input id="reason" type="text" placeholder="reason (optional) - Enter confirms a removal">
+        <input id="reason" type="text" placeholder="reason (optional) - leave empty and press n to remove without one">
         <div class="btns">
           <button class="keep" onclick="decide('keep')">Keep (y)</button>
-          <button class="rem"  onclick="startRemove()">Remove (n)</button>
+          <button class="rem"  onclick="decide('remove')">Remove (n)</button>
           <button onclick="next(1)">Skip (s)</button>
           <button onclick="next(-1)">Prev (←)</button>
         </div>
