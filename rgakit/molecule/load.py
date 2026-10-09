@@ -23,7 +23,9 @@ def embed_single(mol):
     params = AllChem.ETKDGv3()
     params.randomSeed = 42
     if AllChem.EmbedMolecule(mol, params) != 0:
-        if AllChem.EmbedMolecule(mol, AllChem.ETKDG()) != 0:
+        params.useRandomCoords = True
+        if (AllChem.EmbedMolecule(mol, AllChem.ETKDG()) != 0
+                and AllChem.EmbedMolecule(mol, params) != 0):
             raise RuntimeError(
                 "RDKit could not generate a 3-D conformer. "
                 "Check that the SMILES is valid and the molecule is not too large."
