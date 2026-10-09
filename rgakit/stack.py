@@ -6,7 +6,7 @@ SpectrumStack: a source-agnostic time-resolved mass spectrum dataset.
 Public API
 ----------
 SpectrumStack(time, pressure, mz=None, shutter=None, shutter_time=None,
-              open_time=None, close_time=None)
+              open_time=None, close_time=None, tey=None, metadata=None)
     Direct construction from arrays.
 
 SpectrumStack.from_rga(rga)
@@ -54,6 +54,10 @@ class SpectrumStack:
     open_time    : float, optional — known shutter-open time (s)
     close_time   : float, optional — known shutter-close time (s)
     name         : str, optional — label for the measurement
+    tey          : (n_tey,) float, optional — total electron yield on the
+                   *shutter_time* axis
+    metadata     : dict, optional — run-level information (start time,
+                   photodiode current, stage position, ...)
     """
 
     def __init__(
@@ -66,10 +70,14 @@ class SpectrumStack:
         open_time:    float | None      = None,
         close_time:   float | None      = None,
         name:         str               = "",
+        tey:          np.ndarray | None = None,
+        metadata:     dict | None       = None,
     ):
         self.time     = np.asarray(time,     dtype=float)
         self.pressure = np.asarray(pressure, dtype=float)
         self.name     = name
+        self.tey      = None if tey is None else np.asarray(tey, dtype=float)
+        self.metadata = dict(metadata or {})
 
         if mz is None:
             self.mz = np.arange(1, self.pressure.shape[1] + 1, dtype=int)
@@ -93,6 +101,11 @@ class SpectrumStack:
         if len(self.mz) != self.pressure.shape[1]:
             raise ValueError("mz length must match pressure.shape[1].")
 
+    def __setstate__(self, state):
+        state.setdefault("tey", None)
+        state.setdefault("metadata", {})
+        self.__dict__.update(state)
+
     # ------------------------------------------------------------------
     # Constructors
     # ------------------------------------------------------------------
@@ -114,6 +127,17 @@ class SpectrumStack:
         """
         open_time  = getattr(rga, "open_time",  None)
         close_time = getattr(rga, "close_time", None)
+        start_time = getattr(rga, "start_time", None)
+
+        metadata = {
+            "start_time":    start_time.isoformat() if start_time is not None else None,
+            "pd_ua":         getattr(rga, "pd", None),
+            "dark_pd_ua":    getattr(rga, "dark_pd", None),
+            "chamber_torr":  getattr(rga, "chamber_pressure", None),
+            "x":             getattr(rga, "x", None),
+            "y":             getattr(rga, "y", None),
+            "scan_settings": getattr(rga, "scan_settings", None),
+        }
 
         stack = cls(
             time         = rga.time,
@@ -124,6 +148,8 @@ class SpectrumStack:
             open_time    = open_time,
             close_time   = close_time,
             name         = name or getattr(rga, "sample_name", ""),
+            tey          = getattr(rga, "tey_signal", None),
+            metadata     = {k: v for k, v in metadata.items() if v is not None},
         )
         raw = getattr(rga, "_raw_pressure", None)
         if raw is not None:
@@ -221,6 +247,8 @@ class SpectrumStack:
             open_time    = open_time,
             close_time   = close_time,
             name         = self.name,
+            tey          = self.tey,
+            metadata     = self.metadata,
         )
         new._raw_pressure = self.pressure.copy()
         new._bg_off1 = (open_time  - gap_before - window, open_time  - gap_before)
@@ -256,6 +284,8 @@ class SpectrumStack:
             open_time    = ot,
             close_time   = ct,
             name         = self.name,
+            tey          = self.tey,
+            metadata     = self.metadata,
         )
 
     def integrated_pressure(
