@@ -6,13 +6,15 @@ SpectrumStack: a source-agnostic time-resolved mass spectrum dataset.
 Public API
 ----------
 SpectrumStack(time, pressure, mz=None, shutter=None, shutter_time=None,
-              open_time=None, close_time=None, tey=None, metadata=None)
+              open_time=None, close_time=None, tey=None, metadata=None,
+              channel_offset=None)
     Direct construction from arrays.
 
 SpectrumStack.from_rga(rga)
     Adapter for clabs RGAMeasurement objects.
 
-stack.background_correct(window, gap_before, gap_after) -> SpectrumStack
+stack.background_correct(window, gap_before, gap_after, method, order, skip_first)
+    -> SpectrumStack
     Returns a new background-corrected stack.
 
 stack.averaged(time_range=None) -> MassSpectrum
@@ -58,6 +60,9 @@ class SpectrumStack:
                    *shutter_time* axis
     metadata     : dict, optional — run-level information (start time,
                    photodiode current, stage position, ...)
+    channel_offset : (n_mz,) float, optional — time (s) at which each channel
+                   is sampled relative to the start of its scan; used by
+                   :meth:`background_correct` and :meth:`averaged`
     """
 
     def __init__(
@@ -72,6 +77,7 @@ class SpectrumStack:
         name:         str               = "",
         tey:          np.ndarray | None = None,
         metadata:     dict | None       = None,
+        channel_offset: np.ndarray | None = None,
     ):
         self.time     = np.asarray(time,     dtype=float)
         self.pressure = np.asarray(pressure, dtype=float)
@@ -94,16 +100,21 @@ class SpectrumStack:
         self._bg_off1: tuple[float, float] | None = None   # (t_start, t_end) pre-shutter window
         self._bg_off2: tuple[float, float] | None = None   # (t_start, t_end) post-shutter window
 
+        self.channel_offset = None if channel_offset is None else np.asarray(channel_offset, dtype=float)
+
         if self.pressure.ndim != 2:
             raise ValueError("pressure must be a 2-D array (n_times, n_mz).")
         if len(self.time) != self.pressure.shape[0]:
             raise ValueError("time length must match pressure.shape[0].")
         if len(self.mz) != self.pressure.shape[1]:
             raise ValueError("mz length must match pressure.shape[1].")
+        if self.channel_offset is not None and len(self.channel_offset) != self.pressure.shape[1]:
+            raise ValueError("channel_offset length must match pressure.shape[1].")
 
     def __setstate__(self, state):
         state.setdefault("tey", None)
         state.setdefault("metadata", {})
+        state.setdefault("channel_offset", None)
         self.__dict__.update(state)
 
     # ------------------------------------------------------------------
@@ -205,9 +216,12 @@ class SpectrumStack:
         window:     float = 30.0,
         gap_before: float = 5.0,
         gap_after:  float = 10.0,
+        method:     str = "linear",
+        order:      int | None = None,
+        skip_first: int = 0,
     ) -> "SpectrumStack":
         """
-        Per-channel linear background subtraction.
+        Per-channel background subtraction (see :func:`rgakit.background.background_correct`).
 
         Requires that shutter and shutter_time arrays are available (set
         automatically by ``from_rga``).  Returns a new, corrected
@@ -218,6 +232,9 @@ class SpectrumStack:
         window     : duration (s) of each background window
         gap_before : gap (s) between end of pre-shutter window and shutter open
         gap_after  : gap (s) between shutter close and start of post-shutter window
+        method     : "linear" (pre + post windows) or "pre" (pre-open window only)
+        order      : baseline polynomial order; defaults to 1 for "linear", 0 for "pre"
+        skip_first : number of leading scans never used as background
         """
         if self._shutter is None or self._shutter_time is None:
             raise ValueError(
@@ -236,6 +253,10 @@ class SpectrumStack:
             window       = window,
             gap_before   = gap_before,
             gap_after    = gap_after,
+            method       = method,
+            order        = order,
+            skip_first   = skip_first,
+            channel_offset = self.channel_offset,
         )
 
         new = SpectrumStack(
@@ -249,10 +270,12 @@ class SpectrumStack:
             name         = self.name,
             tey          = self.tey,
             metadata     = self.metadata,
+            channel_offset = self.channel_offset,
         )
         new._raw_pressure = self.pressure.copy()
         new._bg_off1 = (open_time  - gap_before - window, open_time  - gap_before)
-        new._bg_off2 = (close_time + gap_after,            close_time + gap_after + window)
+        new._bg_off2 = ((close_time + gap_after, close_time + gap_after + window)
+                        if method == "linear" else None)
         logger.info(
             "Background-corrected %r: open=%.1f s, close=%.1f s, %d m/z channels",
             self.name, open_time, close_time, self.n_mz,
@@ -286,6 +309,7 @@ class SpectrumStack:
             name         = self.name,
             tey          = self.tey,
             metadata     = self.metadata,
+            channel_offset = self.channel_offset,
         )
 
     def integrated_pressure(
@@ -333,18 +357,20 @@ class SpectrumStack:
         from .spectrum import MassSpectrum
 
         t_start, t_end = time_range if time_range is not None else self.open_window
-        mask = (self.time >= t_start) & (self.time <= t_end)
-        if not mask.any():
+        offset = np.zeros(self.n_mz) if self.channel_offset is None else self.channel_offset
+        tc   = self.time[:, None] + offset[None, :]
+        mask = (tc >= t_start) & (tc <= t_end)
+        if not mask.any(axis=0).all():
             raise ValueError(
-                f"No scans in [{t_start:.1f}, {t_end:.1f}] s "
+                f"No scans in [{t_start:.1f}, {t_end:.1f}] s for some channels "
                 f"(time axis spans [{self.time[0]:.1f}, {self.time[-1]:.1f}] s)."
             )
 
-        mean_pressure = self.pressure[mask, :].mean(axis=0)
+        mean_pressure = np.where(mask, self.pressure, 0.0).sum(axis=0) / mask.sum(axis=0)
         nonzero       = mean_pressure > 0
 
         metadata = {
-            "n_averaged_scans": int(mask.sum()),
+            "n_averaged_scans": int(mask.sum(axis=0).min()),
             "t_start":          t_start,
             "t_end":            t_end,
         }
