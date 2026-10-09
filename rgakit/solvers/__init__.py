@@ -27,6 +27,7 @@ def make_solver(
     prune_tolerance: float          = 0.01,
     n_trials:        int            = 1,
     temperature:     float          = 0.3,
+    random_state:    int | None     = None,
 ):
     """
     Return a callable ``(A, y) -> (weights, residual)`` for the requested solver.
@@ -43,6 +44,8 @@ def make_solver(
                       during ROMP backward pruning (default 1%).
     n_trials        : Independent OMP / ROMP trajectories (default 1 = greedy).
     temperature     : Softmax temperature for stochastic OMP / ROMP (default 0.3).
+    random_state    : Seed for the stochastic OMP / ROMP trials.  None =
+                      fresh entropy each call; set for reproducible fits.
 
     Returns
     -------
@@ -62,12 +65,14 @@ def make_solver(
 
     if method == "omp":
         from .omp import make_omp
-        return make_omp(n_compounds, min_improvement, n_trials, temperature)
+        return make_omp(n_compounds, min_improvement, n_trials, temperature,
+                        random_state=random_state)
 
     if method == "romp":
         from .romp import make_romp
         return make_romp(n_compounds, min_improvement, prune_tolerance,
-                         n_trials=n_trials, temperature=temperature)
+                         n_trials=n_trials, temperature=temperature,
+                         random_state=random_state)
 
     raise ValueError(
         f"Unknown fitting method {method!r}. "

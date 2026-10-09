@@ -13,6 +13,7 @@ with the lowest residual wins.
 
 Stopping criteria
 -----------------
+
 Selection stops when any of the following is true:
 
   - The best remaining correlation with the residual is <= 0.
@@ -25,7 +26,8 @@ Selection stops when any of the following is true:
 from __future__ import annotations
 
 import numpy as np
-from scipy.optimize import nnls
+
+from .nnls import solve_nnls
 
 
 def make_omp(
@@ -33,6 +35,7 @@ def make_omp(
     min_improvement: float      = 0.005,
     n_trials:        int        = 1,
     temperature:     float      = 0.3,
+    random_state:    int | None = None,
 ):
     """
     Return an OMP solver callable ``(A, y) -> (weights, residual)``.
@@ -43,8 +46,10 @@ def make_omp(
     min_improvement : Minimum relative residual reduction to keep adding (0.5%).
     n_trials        : Number of independent trajectories (default 1 = greedy).
     temperature     : Softmax temperature for stochastic trials (default 0.3).
+    random_state    : Seed for the stochastic trials.  None = fresh entropy
+                      each call; set for reproducible fits.
     """
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(random_state)
 
     def _omp_single(A, y, stochastic: bool = False):
         n_comp    = A.shape[1]
@@ -78,7 +83,7 @@ def make_omp(
             active.append(best_j)
             remaining.remove(best_j)
 
-            w_act, _ = nnls(A[:, active], y)
+            w_act, _ = solve_nnls(A[:, active], y)
 
             if w_act[-1] <= 0:
                 active.pop()
@@ -93,7 +98,7 @@ def make_omp(
             residual  = y - A[:, active] @ w_act
 
         if active:
-            w_act, _ = nnls(A[:, active], y)
+            w_act, _ = solve_nnls(A[:, active], y)
             for i, j in enumerate(active):
                 w_full[j] = w_act[i]
 

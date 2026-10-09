@@ -603,6 +603,7 @@ class SpectraLibrary:
         noise_floor:     float             = 0.01,
         suggest_from                       = None,
         suggest_k:       int               = 10,
+        random_state:    int | None        = None,
     ) -> FitResult:
         """
         Decompose an unknown spectrum by non-negative least squares or sparse fitting.
@@ -666,6 +667,8 @@ class SpectraLibrary:
                          against this database and the top candidates are
                          stored in :attr:`FitResult.suggestions`.
         suggest_k      : Number of suggestions to return (default 10).
+        random_state   : Seed for the stochastic OMP / ROMP trials.  None =
+                         fresh entropy each call; set for reproducible fits.
 
         Returns
         -------
@@ -735,7 +738,8 @@ class SpectraLibrary:
                             n_compounds=n_compounds,
                             min_improvement=min_improvement,
                             prune_tolerance=prune_tolerance,
-                            n_trials=n_trials, temperature=temperature)
+                            n_trials=n_trials, temperature=temperature,
+                            random_state=random_state)
 
         if weighted:
             sw = _channel_weights(y, grid, noise_floor)
@@ -835,6 +839,7 @@ class SpectraLibrary:
         weighted:        bool                          = True,
         noise_floor:     float                         = 0.01,
         lambda_temporal: float                         = 0.0,
+        random_state:    int | None                    = None,
     ) -> TimeFitResult:
         """
         Fit every scan in the full time-series and return per-scan contributions.
@@ -940,7 +945,8 @@ class SpectraLibrary:
                             n_compounds=n_compounds,
                             min_improvement=min_improvement,
                             prune_tolerance=prune_tolerance,
-                            n_trials=n_trials, temperature=temperature)
+                            n_trials=n_trials, temperature=temperature,
+                            random_state=random_state)
 
         # Temporal regularisation: augment each scan's system with a penalty
         # that pulls weights toward the previous scan's values.

@@ -13,6 +13,8 @@ alpha    : overall regularisation strength, relative to alpha_max (0–1).
 l1_ratio : balance between L1 and L2.  1.0 = pure LASSO, 0.5 = equal mix,
            0.0 = pure ridge.  Default 0.7 gives good sparsity with some
            collinearity tolerance.
+
+Requires scikit-learn (``pip install rgakit[solve]``).
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ def make_elastic_net(alpha: float = 0.1, l1_ratio: float = 0.7):
     Return an Elastic Net solver callable ``(A, y) -> (weights, residual)``.
 
     The returned callable is **stateful**: a single ``ElasticNet`` model
-    instance is shared across calls with ``warm_start=True``.
+    instance is shared across calls with ``warm_start=True``.  Not thread-safe.
     """
     try:
         from sklearn.linear_model import ElasticNet

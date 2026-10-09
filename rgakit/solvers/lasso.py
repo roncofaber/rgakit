@@ -7,6 +7,8 @@ The user-facing ``alpha`` is a relative value in (0, 1).  Internally it is
 multiplied by ``alpha_max = max(A.T @ y) / n_channels``, which is the exact
 threshold above which all weights become zero.  This makes ``alpha``
 meaningful regardless of the number of m/z channels or signal scale.
+
+Requires scikit-learn (``pip install rgakit[solve]``).
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ def make_lasso(alpha: float = 0.1):
     Return a LASSO solver callable ``(A, y) -> (weights, residual)``.
 
     The returned callable is **stateful**: a single ``Lasso`` model instance
-    is shared across calls with ``warm_start=True``.
+    is shared across calls with ``warm_start=True``.  Not thread-safe.
     """
     try:
         from sklearn.linear_model import Lasso

@@ -29,6 +29,7 @@ dependencies = [
 
 [project.optional-dependencies]
 search = ["hnswlib", "gensim>=4.1"]
+solve = ["scikit-learn>=1.0"]
 
 [project.scripts]
 rgakit-review = "rgakit.review:cli_main"

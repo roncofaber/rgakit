@@ -9,7 +9,8 @@ from X-ray irradiated perovskite thin films.
 ## Features
 
 - **NNLS and sparse fitting** - non-negative least-squares, LASSO, Elastic Net,
-  OMP and ROMP decomposition against a reference library
+  OMP and ROMP decomposition against a reference library; stochastic OMP/ROMP
+  trials are seedable for reproducible fits
 - **Similarity metrics** - cosine, Jaccard, Pearson, spectral entropy; pairwise
   matrix for clustering
 - **Library search** - rank candidates by any similarity metric before fitting
@@ -35,6 +36,8 @@ from X-ray irradiated perovskite thin films.
 
 ```bash
 pip install rgakit
+# extra solver methods (LASSO, Elastic Net):
+pip install "rgakit[solve]"
 ```
 
 ## Quick start
