@@ -71,3 +71,35 @@ def test_decisions_roundtrip_and_apply(tmp_path):
     assert "Nitrogen" not in allowed.names()
     assert "Ethane" in allowed.names()
     assert len(allowed) == 1
+
+
+def test_scale_library_with_sigma_map(tmp_path):
+    import numpy as np
+    from rgakit.spectrum import MassSpectrum
+    from rgakit.library import SpectraLibrary
+    from rgakit.crosssection import scale_library_by_cross_section
+
+    lib = SpectraLibrary([
+        MassSpectrum(mz=np.array([28]), intensity=np.array([1.0]), name="A",
+                     metadata={"inchikey": "IK1", "smiles": "C"}),
+        MassSpectrum(mz=np.array([44]), intensity=np.array([1.0]), name="B",
+                     metadata={"inchikey": "IK2", "smiles": "O"}),
+    ])
+
+    scaled = scale_library_by_cross_section(lib, sigma_map={"A": 4.0, "B": 2.0})
+
+    assert scaled["A"].intensity[0] == 4.0
+    assert scaled["B"].intensity[0] == 2.0
+    assert scaled["A"].metadata["cross_section_A2"] == 4.0
+
+
+def test_beb_sigma_h2():
+    import pytest
+    try:
+        import pyscf  # noqa: F401
+    except ImportError:
+        pytest.skip("pyscf not available")
+
+    from rgakit.crosssection import beb_sigma
+    s = beb_sigma("O", energy=70.0)   # water as a fast sanity case
+    assert 1.0 < s < 6.0

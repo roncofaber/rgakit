@@ -38,6 +38,8 @@ from X-ray irradiated perovskite thin films.
 pip install rgakit
 # extra solver methods (LASSO, Elastic Net):
 pip install "rgakit[solve]"
+# ionization cross sections (BEB library scaling):
+pip install "rgakit[beb]"
 ```
 
 ## Quick start
