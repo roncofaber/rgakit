@@ -165,10 +165,21 @@ def add_fragment(
     ))
 
 
+def _carbon_count(smi: str) -> int | None:
+    """Carbon-atom count for a SMILES string, or None if it does not parse."""
+    from rdkit import Chem
+
+    mol = Chem.MolFromSmiles(smi)
+    if mol is None:
+        return None
+    return sum(1 for a in mol.GetAtoms() if a.GetAtomicNum() == 6)
+
+
 def add_radical_pairs(
     raws:    list,
     results: list,
     seen:    set[str],
+    max_carbons: int | None = None,
 ) -> None:
     """
     SMILES-level pairwise radical recombination over *raws*.
@@ -185,9 +196,18 @@ def add_radical_pairs(
         then combine_radicals is applied as in R1.
 
     New fragments are appended to *results*; already-seen SMILES are skipped.
+    *max_carbons*, when given, drops any candidate product with more
+    carbon atoms than that before it is added (default None = unchanged).
     """
     n_before = len(results)
     n_pairs  = 0
+
+    def _add(smi, parent_idx):
+        if max_carbons is not None:
+            n = _carbon_count(smi)
+            if n is not None and n > max_carbons:
+                return
+        add_fragment(smi, parent_idx, results, seen)
 
     for i, j in combinations(range(len(raws)), 2):
         fa, fb = raws[i], raws[j]
@@ -197,7 +217,7 @@ def add_radical_pairs(
             n_pairs += 1
             for smi in combine_radicals(fa.smiles, fb.smiles):
                 smi = hcap_smiles(smi) or smi
-                add_fragment(smi, fa.parent_idx + fb.parent_idx, results, seen)
+                _add(smi, fa.parent_idx + fb.parent_idx)
         else:
             # R2: anion + radical (try both orderings)
             for anion, radical in ((fa, fb), (fb, fa)):
@@ -209,12 +229,7 @@ def add_radical_pairs(
                 rad_smi = anion_to_radical(anion.smiles)
                 for smi in combine_radicals(rad_smi, radical.smiles):
                     smi = hcap_smiles(smi) or smi
-                    add_fragment(
-                        smi,
-                        anion.parent_idx + radical.parent_idx,
-                        results,
-                        seen,
-                    )
+                    _add(smi, anion.parent_idx + radical.parent_idx)
 
     logger.debug(
         "  add_radical_pairs: %d reactive pair(s) → %d new product(s).",
@@ -730,6 +745,7 @@ class Compound:
         max_heavy: int | None = None,
         max_cuts:  int        = 1,
         depth:     int        = 1,
+        max_carbons: int | None = None,
     ) -> list:
         """
         Enumerate chemically plausible EI-MS fragments from the parent molecule.
@@ -805,6 +821,12 @@ class Compound:
             ``depth=1`` (default): enumerate cuts on the parent only.
             ``depth=2``: also enumerate cuts on each level-1 fragment, producing
             secondary fragments (M → A → C).  Higher values are rarely needed.
+        max_carbons : int | None
+            Keep a Stage 2 Rule 3 (radical pairing) product only if its
+            carbon count does not exceed this (default None = unchanged
+            behaviour); pass the parent cation's own carbon count to
+            exclude intermolecular chain-growth products. See
+            :meth:`build_stable`.
 
         Returns
         -------
@@ -869,10 +891,10 @@ class Compound:
                     break
 
         # Build stable fragment list from raw cuts (SMILES-level).
-        self._fragments = self.build_stable()
+        self._fragments = self.build_stable(max_carbons=max_carbons)
         return self._fragments
 
-    def do_recombination(self) -> list:
+    def do_recombination(self, max_carbons: int | None = None) -> list:
         """
         Try all pairwise recombinations of raw_fragments and add stable
         products to the fragment library (SMILES-level, no calculator required).
@@ -885,15 +907,20 @@ class Compound:
         For geometry optimisation and MLIP-verified bond formation, call
         :meth:`relax_recombination` afterwards.
 
+        Parameters
+        ----------
+        max_carbons : keep a product only if its carbon count does not
+            exceed this (default None = unchanged behaviour)
+
         Returns
         -------
         list of newly added Compound objects (in fragment mode)
         """
         # Raises RuntimeError if do_fragmentation() has not been called yet.
         _ = self.fragments
-        return self.recombine_smiles()
+        return self.recombine_smiles(max_carbons=max_carbons)
 
-    def recombine_smiles(self) -> list:
+    def recombine_smiles(self, max_carbons: int | None = None) -> list:
         """
         SMILES-level pairwise recombination (no MLIP).
 
@@ -913,12 +940,17 @@ class Compound:
 
         Products already present in the fragment library (by canonical SMILES)
         are silently skipped.  Returns the list of newly added Compound objects.
+
+        Parameters
+        ----------
+        max_carbons : keep a product only if its carbon count does not
+            exceed this (default None = unchanged behaviour)
         """
         raws      = self.raw_fragments
         seen      = {f.smiles for f in self._fragments if f.smiles is not None}
         new_frags : list[Compound] = []
 
-        add_radical_pairs(raws, new_frags, seen)
+        add_radical_pairs(raws, new_frags, seen, max_carbons=max_carbons)
 
         self._fragments.extend(new_frags)
         self._fragments.sort(key=lambda f: (f.n_heavy, f.formula))
@@ -933,6 +965,7 @@ class Compound:
         cls,
         compounds,
         include_h_radical: bool = True,
+        max_carbons: int | None = None,
     ) -> list:
         """
         Model solid-state radical recombination across one or more compounds.
@@ -968,6 +1001,9 @@ class Compound:
             One or more compounds whose radical pools are merged.
         include_h_radical : bool
             Include H• in the pool (default True).
+        max_carbons : int | None
+            Keep a candidate product only if its carbon count does not
+            exceed this (default None = unchanged behaviour).
 
         Returns
         -------
@@ -1014,7 +1050,12 @@ class Compound:
                 if products:
                     n_pairs += 1
                 for smi in products:
-                    add_fragment(hcap_smiles(smi) or smi, (), new_frags, seen)
+                    smi = hcap_smiles(smi) or smi
+                    if max_carbons is not None:
+                        n = _carbon_count(smi)
+                        if n is not None and n > max_carbons:
+                            continue
+                    add_fragment(smi, (), new_frags, seen)
         finally:
             _rdlog.setLevel(_RDLogger.WARNING)
 
@@ -1027,6 +1068,7 @@ class Compound:
     def do_solid_state_recombination(
         self,
         include_h_radical: bool = True,
+        max_carbons: int | None = None,
     ) -> list:
         """
         Solid-state radical recombination for this compound.
@@ -1041,13 +1083,20 @@ class Compound:
         ----------
         include_h_radical : bool
             Include H• in the radical pool (default True).
+        max_carbons : int | None
+            Keep a candidate product only if its carbon count does not
+            exceed this (default None = unchanged behaviour). Pass e.g.
+            the parent cation's own carbon count to exclude
+            intermolecular chain-growth products.
 
         Returns
         -------
         list of newly added Compound objects (in fragment mode)
         """
         _ = self.fragments  # guard: raises if do_fragmentation() not called
-        new_frags = Compound.solid_state_recombination([self], include_h_radical)
+        new_frags = Compound.solid_state_recombination(
+            [self], include_h_radical, max_carbons=max_carbons,
+        )
         self._fragments.extend(new_frags)
         self._fragments.sort(key=lambda f: (f.n_heavy, f.formula))
         return new_frags
@@ -1248,7 +1297,7 @@ class Compound:
         logger.info("Found %d unique raw fragments.", len(results))
         return results
 
-    def build_stable(self) -> list:
+    def build_stable(self, max_carbons: int | None = None) -> list:
         """
         Convert raw (radical) fragments to stable, database-queryable species.
 
@@ -1294,6 +1343,14 @@ class Compound:
         .. note::
             Ion pairs are excluded.  See ``project_deferred.md``.
 
+        Parameters
+        ----------
+        max_carbons : int | None
+            Keep a Rule 3 (radical pairing) product only if its carbon
+            count does not exceed this (default None = unchanged
+            behaviour); the other three rules cannot grow a fragment's
+            carbon count, so this only applies to Rule 3.
+
         Returns
         -------
         list of Compound
@@ -1330,7 +1387,7 @@ class Compound:
         logger.debug("  Rule 2b (H-migr):     %d new fragment(s)", n2b)
 
         # Rule 3: radical pairing (radical+radical and anion+radical).
-        add_radical_pairs(raws, results, seen)
+        add_radical_pairs(raws, results, seen, max_carbons=max_carbons)
         n3 = len(results) - n1 - n2 - n2b
         logger.debug("  Rule 3 (rad pairing): %d new fragment(s)", n3)
 

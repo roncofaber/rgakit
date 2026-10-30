@@ -18,12 +18,16 @@ from .review          import launch_review, build_candidates, apply_decisions
 from .molecule     import Compound, generate_fragment_wheel, generate_fragment_wheel_svg
 from .databases    import (InSilicoDatabase, MassBankDatabase,
                            MonaDatabase, MonaLocalDatabase, NistDatabase)
+from .neutrals     import (generate_neutral_products, candidates_library,
+                           NeutralProduct, NeutralRule)
+from .environment  import (ENVIRONMENT_SETS, build_environment_library,
+                           allowed_elements_from_ion_pair)
 
 # Standard library practice: add NullHandler so logs are silently discarded
 # unless the calling application configures logging.
 logging.getLogger("rgakit").addHandler(logging.NullHandler())
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -78,4 +82,11 @@ __all__ = [
     "MonaDatabase",
     "MonaLocalDatabase",
     "NistDatabase",
+    "generate_neutral_products",
+    "candidates_library",
+    "NeutralProduct",
+    "NeutralRule",
+    "ENVIRONMENT_SETS",
+    "build_environment_library",
+    "allowed_elements_from_ion_pair",
 ]

@@ -102,7 +102,8 @@ def build_candidates(libraries, *, weights: dict[str, list[float]] | None = None
     stats : dict {compound name: {n_samples, mean_w, max_w}}, optional
         Pre-computed statistics (takes precedence over *weights*).
     background_names : iterable of str
-        Compound names flagged as background tier.
+        Compound names flagged as background tier; spectra tagged
+        ``metadata["environment"]`` are background tier as well.
 
     Returns
     -------
@@ -140,10 +141,11 @@ def build_candidates(libraries, *, weights: dict[str, list[float]] | None = None
             "n_samples": s["n_samples"],
             "mean_w": s["mean_w"],
             "max_w": s["max_w"],
+            "environment": bool(meta.get("environment")),
         })
 
     def sort_key(c):
-        tier = 0 if c["name"] in bg else (1 if c["n_samples"] else 2)
+        tier = 0 if (c["name"] in bg or c.get("environment")) else (1 if c["n_samples"] else 2)
         return (tier, -c["n_samples"], c["name"])
 
     compounds.sort(key=sort_key)

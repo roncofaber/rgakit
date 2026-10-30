@@ -115,6 +115,9 @@ class SpectrumStack:
         state.setdefault("tey", None)
         state.setdefault("metadata", {})
         state.setdefault("channel_offset", None)
+        state.setdefault("_raw_pressure", None)
+        state.setdefault("_bg_off1", None)
+        state.setdefault("_bg_off2", None)
         self.__dict__.update(state)
 
     # ------------------------------------------------------------------
@@ -298,7 +301,7 @@ class SpectrumStack:
             )
         ot = max(self._open_time,  t_start) if self._open_time  is not None else None
         ct = min(self._close_time, t_end)   if self._close_time is not None else None
-        return SpectrumStack(
+        new = SpectrumStack(
             time         = self.time[mask],
             pressure     = self.pressure[mask, :],
             mz           = self.mz,
@@ -311,6 +314,11 @@ class SpectrumStack:
             metadata     = self.metadata,
             channel_offset = self.channel_offset,
         )
+        if self._raw_pressure is not None:
+            new._raw_pressure = self._raw_pressure[mask, :]
+        new._bg_off1 = self._bg_off1
+        new._bg_off2 = self._bg_off2
+        return new
 
     def integrated_pressure(
         self,
@@ -381,9 +389,40 @@ class SpectrumStack:
             metadata  = metadata,
         )
 
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
+    def extract_run_signals(
+        self,
+        window:     float | None = None,
+        gap_before: float = 0.5,
+        settle:     float = 0.0,
+        duration:   float | None = None,
+        skip_first: int = 1,
+    ) -> dict[str, np.ndarray | float]:
+        """
+        Compute per-channel pre-exposure baseline, noise, beam-on rise,
+        standard error, and z-score vectors for this stack (see :func:`rgakit.background.extract_run_signals`).
+
+        Uses the raw (pre-background-correction) pressure when available,
+        falling back to ``self.pressure`` for a stack with no ``_raw_pressure``
+        set. A shutter-less stack's ``open_window`` falls back to the full
+        time axis, which leaves an empty pre-exposure window and so every
+        returned field is NaN; this method does not special-case that.
+        """
+        from .background import extract_run_signals as _ext
+
+        raw = self._raw_pressure if self._raw_pressure is not None else self.pressure
+        ot, ct = self.open_window
+        return _ext(
+            time           = self.time,
+            pressure       = raw,
+            open_time      = ot,
+            close_time     = ct,
+            window         = window,
+            gap_before     = gap_before,
+            settle         = settle,
+            duration       = duration,
+            skip_first     = skip_first,
+            channel_offset = self.channel_offset,
+        )
 
     def save(self, path: str) -> None:
         """Serialize this SpectrumStack to disk with dill."""

@@ -20,10 +20,10 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Columns returned by all queries (17 total)
+# Columns returned by all queries (18 total)
 _SELECT = """
     SELECT s.id, s.inchikey, s.source,
-           c.smiles, c.exact_mass, c.cas,
+           c.smiles, c.exact_mass, c.cas, c.molecular_formula,
            s.mzs, s.intensities,
            s.precursor_mz, s.precursor_type,
            s.ionization_mode, s.ms_level,
@@ -117,7 +117,7 @@ class LocalSpectralDatabase:
         from rgakit.spectrum import MassSpectrum
 
         (spec_id, inchikey, source,
-         smiles, exact_mass, cas,
+         smiles, exact_mass, cas, molecular_formula,
          mzs_blob, int_blob,
          precursor_mz, precursor_type, ionization_mode, ms_level,
          instrument_type, instrument, collision_energy,
@@ -138,6 +138,7 @@ class LocalSpectralDatabase:
             metadata  = {
                 "source":          source,
                 "smiles":          smiles,
+                "formula":         molecular_formula,
                 "mw":              exact_mass,
                 "cas":             cas,
                 "inchikey":        inchikey,
@@ -320,6 +321,7 @@ class LocalSpectralDatabase:
         spectrum,
         k:         int   = 10,
         threshold: float = 0.3,
+        elements:  "set[str] | None" = None,
     ) -> list[tuple]:
         """
         Find the *k* most similar spectra by cosine similarity.
@@ -334,6 +336,12 @@ class LocalSpectralDatabase:
         spectrum  : :class:`~rgakit.spectrum.MassSpectrum`
         k         : number of results to return (default 10)
         threshold : minimum cosine similarity to include (default 0.3)
+        elements  : when given, rows whose compound formula contains an
+                    element outside this set are excluded before the
+                    top-*k* cutoff, so *k* results still come back rather
+                    than being filtered after the fact from a smaller pool.
+                    A row with no formula on record is excluded (there is
+                    nothing to check against *elements*).
 
         Returns
         -------
@@ -350,14 +358,36 @@ class LocalSpectralDatabase:
         q_vec   = q_inten / q_norm
         q_map   = {int(m): (i, v) for i, (m, v) in enumerate(zip(q_mz, q_vec))}
 
-        # Fetch all (rowid, mzs_blob, int_blob) from the database
-        sql = "SELECT rowid, mzs, intensities FROM spectra"
+        # Fetch (rowid, mzs_blob, int_blob[, molecular_formula]) from the
+        # database. The formula is joined in up front, not after the top-k
+        # cutoff, so an elements= restriction narrows the candidate pool
+        # before truncation rather than after it.
+        if elements is not None:
+            sql = (
+                "SELECT s.rowid, s.mzs, s.intensities, c.molecular_formula, c.smiles "
+                "FROM spectra s LEFT JOIN compounds c ON s.inchikey = c.inchikey"
+            )
+        else:
+            sql = "SELECT rowid, mzs, intensities FROM spectra"
         params: list = []
         if self._source:
-            sql += " WHERE source = ?"
+            sql += " WHERE s.source = ?" if elements is not None else " WHERE source = ?"
             params.append(self._source)
 
         rows    = self.conn.execute(sql, params).fetchall()
+        if elements is not None:
+            from ..chemutils import formula_from_smiles
+            from .utils import parse_elements
+
+            allowed = set(elements)
+            kept_rows = []
+            for row in rows:
+                rowid, mzs_blob, int_blob, formula, smiles = row
+                formula = formula or (formula_from_smiles(smiles) if smiles else None)
+                if not formula or not (parse_elements(formula) <= allowed):
+                    continue
+                kept_rows.append((rowid, mzs_blob, int_blob))
+            rows = kept_rows
         n_total = len(rows)
         logger.info(
             "%s.search_by_spectrum: scoring %d spectra …",

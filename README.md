@@ -22,9 +22,20 @@ from X-ray irradiated perovskite thin films.
   into pure component spectra, matched against a database afterwards
 - **JDX & MSP I/O** - JCAMP-DX (round-trip with metadata) and NIST MSP
   (multi-entry files)
-- **Background correction** - linear subtraction using beam-off shutter windows
+- **Background correction** - linear or pre-window polynomial baseline from
+  beam-off shutter windows, with per-channel sampling offsets
+- **Run signals** - per-channel pre-exposure level and noise, beam-on rise,
+  standard error and z-score from a time-resolved run
 - **In-silico library generation** - SMILES-based fragment enumeration,
-  optional MLIP geometry relaxation, export to a fitting-ready library
+  optional MLIP geometry relaxation, optional carbon-count cap on
+  recombination products, export to a fitting-ready library
+- **Reaction-rule candidates** - neutral products of an ion pair from named
+  reaction classes (reaction SMARTS), matched against a spectral database
+- **Environment sets and element restriction** - named chamber-gas, pump-oil
+  and solvent sets; restrict a library or a database search to the elements
+  actually present
+- **Ionization cross sections** - NIST SRD 107 BEB values for common gases,
+  on-demand BEB calculation otherwise, cross-section-weighted molar ratios
 - **Interactive HTML report** - observed vs fitted, residual, contributions,
   stacked breakdown
 - **Interactive curation review** - local web app to review candidate compounds
@@ -181,6 +192,40 @@ mol.relax_recombination(calc, log_dir="logs/rec")
 # Visualise the fragmentation tree
 from rgakit.molecule import generate_fragment_wheel_svg
 generate_fragment_wheel_svg(mol, "eai_wheel.svg")
+
+# Drop intermolecular chain-growth products (more carbons than the parent)
+mol = Compound("[NH3+]CCC(=O)O.[I-]")
+mol.do_fragmentation(max_heavy=8, max_carbons=3)
+mol.do_solid_state_recombination(max_carbons=3)
+```
+
+## Reaction-rule candidates and environment species
+
+```python
+from rgakit import NistDatabase, candidates_library
+from rgakit.environment import build_environment_library, allowed_elements_from_ion_pair
+
+nist = NistDatabase("nist_library.db")
+
+# Neutral products of named reaction classes (decarboxylation, deprotonation,
+# Hofmann elimination, ...); the rules generate candidates, they do not
+# claim which reactions occur in a sample
+lib = candidates_library("[NH3+]CCC(=O)O.[I-]", database=nist, flag_shared_markers=True)
+
+# Background species as their own, tagged group
+env = build_environment_library(["chamber_gases", "pump_oil"], database=nist)
+
+# Keep only spectra made of elements present in the film (environment exempt)
+allowed = allowed_elements_from_ion_pair("[NH3+]CCC(=O)O.[I-]")
+lib = lib.restrict_elements(allowed)
+hits = nist.search_by_spectrum(spectrum, k=10, elements=allowed)
+```
+
+## Run signals
+
+```python
+stack = SpectrumStack.from_rga(rga)
+sig = stack.extract_run_signals(settle=25.0)   # per-channel level, noise, rise, se, z
 ```
 
 ## File structure
@@ -194,7 +239,10 @@ rgakit/
     stack.py          SpectrumStack (time-resolved data, shutter windows, background correction)
     decomposition.py  NMF blind source separation (decompose, DecompositionResult)
     similarity.py     cosine / jaccard / pearson / entropy; pairwise matrix
-    background.py     standalone linear background correction
+    background.py     background correction and per-channel run signals
+    neutrals.py       reaction-rule neutral-product candidates
+    environment.py    named environment sets, element restriction helpers
+    crosssection.py   ionization cross sections (NIST BEB table, BEB calculation), molar ratios
     nomenclature.py   name resolution (trivial names, Cactus IUPAC, NIST)
     report.py         interactive HTML report generation
     review.py         interactive compound curation review (local web app)
@@ -205,6 +253,13 @@ rgakit/
                       fragment wheels (matplotlib / SVG)
   databases/          NistDatabase, InSilicoDatabase, MonaDatabase, MonaLocalDatabase,
                       MassBankDatabase, LocalSpectralDatabase (SQLite base class)
+```
+
+## Tests
+
+```bash
+pytest                                      # tests needing the NIST library are skipped
+RGAKIT_NIST_DB=/path/to/nist_library.db pytest
 ```
 
 ## Logging

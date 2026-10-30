@@ -194,7 +194,7 @@ def _match_fragments(frags, library):
 
 def _build_display(all_frags, library, result, show_unmatched,
                    min_contribution, max_frags):
-    """Ordered ``(frag, spec|None)`` list + fit-contribution dict."""
+    """Ordered ``(frag, spec|None)`` list + fit-contribution and signal-share dicts."""
     if library is not None:
         matched, unmatched = _match_fragments(all_frags, library)
     else:
@@ -206,27 +206,46 @@ def _build_display(all_frags, library, result, show_unmatched,
     display.sort(key=lambda x: (-x[0].n_heavy, x[1] is None))
 
     fit_contribs: dict = {}
+    signal_shares: dict = {}
     if result is not None:
         fit_contribs = result.contributions
+        obs_max = float(result.observed.max()) or 1.0
+        obs_sum = float(result.observed.sum()) or 1.0
+        for _, spec in display:
+            if spec is not None and spec.name in fit_contribs:
+                pattern_sum = float(spec.on_grid(result.grid).sum())
+                signal_shares[spec.name] = (
+                    fit_contribs[spec.name] * pattern_sum * obs_max / obs_sum
+                )
         display = [
             (f, spec) for f, spec in display
             if spec is not None
             and fit_contribs.get(spec.name, 0) >= min_contribution
         ]
-        display.sort(key=lambda x: -fit_contribs.get(x[1].name, 0))
+        display.sort(key=lambda x: -signal_shares.get(x[1].name, 0))
 
-    return display[:max_frags], matched, unmatched, fit_contribs
+    return display[:max_frags], matched, unmatched, signal_shares
 
 
-def _frag_label(frag, spec, fit_contribs) -> str:
-    """Two-line label: name (+ %) on line 1, formula + MW on line 2."""
-    name = spec.name if spec else _fmt_formula(frag.formula)
-    if fit_contribs and spec is not None:
-        pct   = fit_contribs.get(spec.name, 0) * 100
-        line1 = f"{name} ({pct:.0f}%)"
+def _distinct_count(items) -> int:
+    """Count distinct compounds in a ``matched``/``unmatched`` list by identity key."""
+    keys = set()
+    for item in items:
+        frag, spec = item if isinstance(item, tuple) else (item, None)
+        keys.add(spec.name if spec is not None else (frag.smiles or frag.formula))
+    return len(keys)
+
+
+def _frag_label(frag, spec, signal_shares) -> str:
+    """Two-line label: name (+ % of measured signal) on line 1, formula + MW on line 2."""
+    formula = _fmt_formula(frag.formula)
+    name = spec.name if spec is not None else formula
+    if signal_shares and spec is not None and spec.name in signal_shares:
+        pct   = signal_shares[spec.name] * 100
+        line1 = f"{name} ({pct:.0f}% signal)"
     else:
         line1 = name
-    line2 = f"{_fmt_formula(frag.formula)}  {frag.monoisotopic_mass:.1f} Da"
+    line2 = f"{formula}  {frag.monoisotopic_mass:.1f} Da" if spec is not None else f"{frag.monoisotopic_mass:.1f} Da"
     return f"{line1}\n{line2}"
 
 
@@ -328,7 +347,7 @@ def generate_fragment_wheel(
     # Fragment selection
     # ------------------------------------------------------------------
     all_frags = [f for f in compound.fragments if f.smiles]
-    display, matched, unmatched, fit_contribs = _build_display(
+    display, matched, unmatched, signal_shares = _build_display(
         all_frags, library, result, show_unmatched, min_contribution, max_frags
     )
     n = len(display)
@@ -461,7 +480,7 @@ def generate_fragment_wheel(
             ly = 0.5 + (r_orbit_f + r_frag_f + _f(2 * arrow_pad_in)) * sin_a
             ha = "left" if cos_a > 0.1 else ("right" if cos_a < -0.1 else "center")
             va = "bottom" if sin_a > 0.1 else ("top" if sin_a < -0.1 else "center")
-            ax.text(lx, ly, _frag_label(frag, spec, fit_contribs),
+            ax.text(lx, ly, _frag_label(frag, spec, signal_shares),
                     ha=ha, va=va, fontsize=_fs_label, color=border_color,
                     transform=ax.transAxes, zorder=6)
 
@@ -473,8 +492,8 @@ def generate_fragment_wheel(
 
     if library is not None and result is None:
         ax.legend(handles=[
-            mpatches.Patch(color=_MATCHED_EDGE, label=f"In library ({len(matched)})"),
-            mpatches.Patch(color=_MISS_EDGE,    label=f"No match ({len(unmatched)})"),
+            mpatches.Patch(color=_MATCHED_EDGE, label=f"In library ({_distinct_count(matched)})"),
+            mpatches.Patch(color=_MISS_EDGE,    label=f"No match ({_distinct_count(unmatched)})"),
         ], loc="lower right", fontsize=_fs_label, framealpha=0.9)
 
     fig.patch.set_facecolor("white")
@@ -579,7 +598,7 @@ def generate_fragment_wheel_svg(
     # Fragment selection — identical logic to matplotlib version
     # ------------------------------------------------------------------
     all_frags = [f for f in compound.fragments if f.smiles]
-    display, matched, unmatched, fit_contribs = _build_display(
+    display, matched, unmatched, signal_shares = _build_display(
         all_frags, library, result, show_unmatched, min_contribution, max_frags
     )
     n = len(display)
@@ -728,7 +747,7 @@ def generate_fragment_wheel_svg(
             ly = cy - (r_orbit_px + r_frag_px + ap * 2) * sin_a
             # text-anchor: left / right / middle depending on angle
             ta = "start" if cos_a > 0.1 else ("end" if cos_a < -0.1 else "middle")
-            label = _frag_label(frag, spec, fit_contribs)
+            label = _frag_label(frag, spec, signal_shares)
             d.append(dsvg.Raw(
                 _svg_multiline_text(
                     label.split("\n"), lx, ly,
@@ -760,8 +779,8 @@ def generate_fragment_wheel_svg(
         leg_y  = fig_h - _px(margin_in)
         swatch = fs_label * 0.9
         for k, (color, label) in enumerate([
-            (_MATCHED_EDGE, f"In library ({len(matched)})"),
-            (_MISS_EDGE,    f"No match ({len(unmatched)})"),
+            (_MATCHED_EDGE, f"In library ({_distinct_count(matched)})"),
+            (_MISS_EDGE,    f"No match ({_distinct_count(unmatched)})"),
         ]):
             ey = leg_y - k * (swatch + swatch * 0.4)
             d.append(dsvg.Raw(

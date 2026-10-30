@@ -137,3 +137,155 @@ def background_correct(
         method, order, n_mz, window, gap_before, gap_after,
     )
     return corrected, open_time, close_time
+
+
+def _resolve_shutter_window(
+    shutter: np.ndarray | None,
+    shutter_time: np.ndarray | None,
+    open_time: float | None,
+    close_time: float | None,
+) -> tuple[float, float]:
+    if open_time is not None and close_time is not None:
+        return float(open_time), float(close_time)
+    if shutter is None or shutter_time is None:
+        raise ValueError(
+            "Either (open_time, close_time) or (shutter, shutter_time) must be provided."
+        )
+    edges = np.diff(np.asarray(shutter, dtype=int))
+    open_idx = np.where(edges > 0)[0]
+    close_idx = np.where(edges < 0)[0]
+    if len(open_idx) == 0 or len(close_idx) == 0:
+        raise ValueError("Could not detect shutter open/close edges.")
+    st = np.asarray(shutter_time, dtype=float)
+    return float(st[open_idx[0] + 1]), float(st[close_idx[0]])
+
+
+def extract_run_signals(
+    time: np.ndarray,
+    pressure: np.ndarray,
+    shutter: np.ndarray | None = None,
+    shutter_time: np.ndarray | None = None,
+    open_time: float | None = None,
+    close_time: float | None = None,
+    window: float | None = None,
+    gap_before: float = 0.5,
+    settle: float = 0.0,
+    duration: float | None = None,
+    skip_first: int = 1,
+    channel_offset: np.ndarray | None = None,
+) -> dict[str, np.ndarray | float]:
+    """
+    Extract per-channel pre-exposure baseline, noise, beam-on rise, standard
+    error, and z-score from a raw RGA time series.
+
+    Windows
+    -------
+    Pre-exposure : by default (``window=None``) every scan from *skip_first*
+                   up to ``open_time - gap_before``; a numeric *window*
+                   limits it to that many seconds ending at the same point.
+    Beam-on      : ``[open_time + settle, close_time]``, or
+                   ``[open_time + settle, open_time + duration]`` when
+                   *duration* caps the window sooner than *close_time*.
+
+    Standard error
+    --------------
+    ``noise`` is each channel's pre-exposure sample standard deviation across
+    its ``n_pre`` scans (``ddof=1``; NaN if ``n_pre < 2``). ``rise`` is the
+    beam-on window mean minus the pre-exposure mean (``level``). The standard
+    error of that difference assumes equal variance between the two windows,
+    estimated from the pre-exposure noise alone::
+
+        se = noise * sqrt(1 / n_on + 1 / n_pre)
+        z  = rise / se
+
+    ``noise`` comes from only ``n_pre`` scans, so ``z`` follows a
+    t distribution with ``n_pre - 1`` degrees of freedom, not a standard
+    normal, so a fixed cut on ``z`` is not a calibrated detection threshold
+    when ``n_pre`` is small.
+
+    ``channel_offset`` (s), when given, shifts each channel's effective
+    sample time (``time + channel_offset[j]``) before the window masks are
+    applied, so scans are assigned to the pre-exposure/beam-on windows per
+    channel rather than per scan. A channel with fewer than 1 pre-exposure
+    scan or fewer than 1 beam-on scan gets NaN in every derived field rather
+    than a silently biased value; there is no implicit floor on ``n_pre``.
+
+    Parameters
+    ----------
+    time           : (n_times,) scan start timestamps (s)
+    pressure       : (n_times, n_mz) raw partial pressures (Torr)
+    shutter        : (n_tey,) binary shutter trace (0=closed, 1=open)
+    shutter_time   : (n_tey,) TEY/shutter time axis (s)
+    open_time      : explicit shutter open time (s); overrides edge detection
+    close_time     : explicit shutter close time (s); overrides edge detection
+    window         : pre-exposure baseline window duration (s); None (default)
+                     uses every scan from skip_first up to open_time - gap_before
+    gap_before     : guard gap before shutter open (s)
+    settle         : settling delay after shutter open (s)
+    duration       : optional cap on beam-on window length from open_time (s)
+    skip_first     : number of leading scans excluded from the pre-window
+    channel_offset : (n_mz,) intra-scan sampling offset per channel (s)
+
+    Returns
+    -------
+    dict with keys ``"level"``, ``"noise"``, ``"rise"``, ``"se"``, ``"z"``,
+    ``"n_pre"``, ``"n_on"``, ``"open_time"``, and ``"close_time"``.
+    """
+    ot, ct = _resolve_shutter_window(shutter, shutter_time, open_time, close_time)
+    time_arr = np.asarray(time, dtype=float)
+    press_arr = np.asarray(pressure, dtype=float)
+    n_times, n_mz = press_arr.shape
+
+    offset = (
+        np.zeros(n_mz, dtype=float)
+        if channel_offset is None
+        else np.asarray(channel_offset, dtype=float)
+    )
+    tc = time_arr[:, None] + offset[None, :]
+    usable = np.arange(n_times)[:, None] >= skip_first
+
+    pre_end = ot - gap_before
+    pre_start = -np.inf if window is None else pre_end - window
+    pre_mask = (tc >= pre_start) & (tc <= pre_end) & usable
+
+    on_start = ot + settle
+    on_end = ct if duration is None else min(ct, ot + duration)
+    on_mask = (tc >= on_start) & (tc <= on_end)
+
+    level = np.full(n_mz, np.nan, dtype=float)
+    noise = np.full(n_mz, np.nan, dtype=float)
+    rise = np.full(n_mz, np.nan, dtype=float)
+    se = np.full(n_mz, np.nan, dtype=float)
+    z = np.full(n_mz, np.nan, dtype=float)
+    n_pre = np.zeros(n_mz, dtype=int)
+    n_on = np.zeros(n_mz, dtype=int)
+
+    for j in range(n_mz):
+        col = press_arr[:, j]
+        m_pre = pre_mask[:, j] & np.isfinite(col)
+        m_on = on_mask[:, j] & np.isfinite(col)
+        np_j = int(m_pre.sum())
+        no_j = int(m_on.sum())
+        n_pre[j] = np_j
+        n_on[j] = no_j
+        if np_j >= 1:
+            level[j] = float(col[m_pre].mean())
+        if np_j >= 2:
+            noise[j] = float(col[m_pre].std(ddof=1))
+        if no_j >= 1 and np_j >= 1:
+            rise[j] = float(col[m_on].mean()) - level[j]
+        if no_j >= 1 and np_j >= 1 and np.isfinite(noise[j]) and noise[j] > 0:
+            se[j] = noise[j] * np.sqrt(1.0 / no_j + 1.0 / np_j)
+            z[j] = rise[j] / se[j]
+
+    return {
+        "level": level,
+        "noise": noise,
+        "rise": rise,
+        "se": se,
+        "z": z,
+        "n_pre": n_pre,
+        "n_on": n_on,
+        "open_time": ot,
+        "close_time": ct,
+    }

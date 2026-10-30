@@ -138,6 +138,12 @@ def formula_from_smiles(smiles: str) -> str | None:
     return None
 
 
+def elements_from_formula(formula: str) -> set[str]:
+    """Element symbols present in a molecular formula string (see :func:`formula_from_smiles`)."""
+    from .databases.utils import parse_elements
+    return parse_elements(formula)
+
+
 def mol_weight_from_smiles(smiles: str) -> float | None:
     """Compute average molecular weight from SMILES."""
     try:

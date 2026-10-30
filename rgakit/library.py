@@ -111,6 +111,7 @@ class SpectraLibrary:
     # ------------------------------------------------------------------
 
     def __len__(self)                         -> int:           return len(self._spectra)
+    def __contains__(self, name: str)         -> bool:          return name in self._spectra
     def __getitem__(self, name: str)          -> MassSpectrum:  return self._spectra[name]
     def __iter__(self):                                          return iter(self._spectra.values())
     def __repr__(self)                        -> str:           return f"SpectraLibrary({len(self)} compounds)"
@@ -383,6 +384,59 @@ class SpectraLibrary:
                 return True
         return False
 
+    def restrict_elements(
+        self,
+        allowed,
+        *,
+        strict: bool = False,
+        exempt_environment: bool = True,
+    ) -> "SpectraLibrary":
+        """
+        Return a new SpectraLibrary dropping any spectrum whose formula
+        contains an element outside *allowed*.
+
+        The formula is taken from ``metadata["formula"]`` when present,
+        else computed from ``metadata["smiles"]`` via
+        :func:`rgakit.chemutils.formula_from_smiles`. A spectrum with
+        neither is kept and logged at INFO, unless *strict* is True (then
+        it is dropped and logged at WARNING instead).
+
+        Spectra tagged ``metadata["environment"] = True`` (see
+        :mod:`rgakit.environment`) are always kept when
+        *exempt_environment* is True (the default): chamber gases,
+        pump-oil hydrocarbons, and process solvents are present regardless
+        of which elements the precursor contains, so an element
+        restriction derived from the precursor should not remove them.
+        """
+        from .chemutils import elements_from_formula, formula_from_smiles
+
+        allowed_set = set(allowed)
+        kept = []
+        for spec in self:
+            if exempt_environment and spec.metadata.get("environment"):
+                kept.append(spec)
+                continue
+            formula = spec.metadata.get("formula")
+            if not formula:
+                smi = spec.metadata.get("smiles")
+                formula = formula_from_smiles(smi) if smi else None
+            if not formula:
+                if strict:
+                    logger.warning(
+                        "restrict_elements: %r has no formula or smiles - dropping (strict=True).",
+                        spec.name,
+                    )
+                    continue
+                logger.info(
+                    "restrict_elements: %r has no formula or smiles - keeping.",
+                    spec.name,
+                )
+                kept.append(spec)
+                continue
+            if elements_from_formula(formula) <= allowed_set:
+                kept.append(spec)
+        return SpectraLibrary(kept)
+
     @property
     def grid(self) -> np.ndarray:
         """Union of all m/z values across every library spectrum."""
@@ -429,6 +483,7 @@ class SpectraLibrary:
         k:           int   = 20,
         threshold:   float = 0.01,
         min_overlap: float = 0.5,
+        elements:    "set[str] | None" = None,
     ) -> list[tuple]:
         """
         Suggest compounds that could explain the unexplained peaks in a fit.
@@ -453,6 +508,12 @@ class SpectraLibrary:
                       total intensity that falls on m/z channels present in the
                       observed spectrum.  Compounds whose main peaks are at
                       m/z values never measured are rejected.
+        elements    : when given, restrict candidates to compounds whose
+                      formula contains only these elements, filtered by
+                      *database* itself before its own top-*k* truncation.
+                      Raises ``TypeError`` if *database*'s ``search_by_spectrum``
+                      does not accept an ``elements`` argument, rather than
+                      silently ignoring the restriction.
 
         Returns
         -------
@@ -499,13 +560,21 @@ class SpectraLibrary:
         # Set of observed m/z channels — for overlap filtering.
         obs_mz = set(int(m) for m in result.grid)
 
-        if hasattr(database, "search_by_spectrum"):
-            raw = database.search_by_spectrum(query, k=k + len(existing_keys))
-        else:
+        if not hasattr(database, "search_by_spectrum"):
             raise TypeError(
                 f"Database {type(database).__name__} does not support "
                 f"search_by_spectrum().  Use InSilicoDatabase with an HNSW index."
             )
+        if elements is not None:
+            import inspect
+            if "elements" not in inspect.signature(database.search_by_spectrum).parameters:
+                raise TypeError(
+                    f"Database {type(database).__name__}.search_by_spectrum() does not "
+                    f"accept elements=; it cannot filter candidates by element."
+                )
+            raw = database.search_by_spectrum(query, k=k + len(existing_keys), elements=elements)
+        else:
+            raw = database.search_by_spectrum(query, k=k + len(existing_keys))
 
         hits = []
         seen: set[str] = set()
@@ -714,6 +783,14 @@ class SpectraLibrary:
         y     = MassSpectrum(mz_obs, y_obs).on_grid(grid)
         names = self.names()
         A     = np.column_stack([self._spectra[n].on_grid(grid) for n in names])
+
+        zero_cols = [names[j] for j in range(A.shape[1]) if not A[:, j].any()]
+        if zero_cols:
+            logger.info(
+                "%d compound(s) have no peaks on the fitting grid and cannot "
+                "be detected in this fit: %s",
+                len(zero_cols), ", ".join(zero_cols),
+            )
 
         # Channels where no library compound has any signal — purely residual.
         n_covered = int(A.any(axis=1).sum())
@@ -928,9 +1005,9 @@ class SpectraLibrary:
         # --- project all scans onto grid --------------------------------
         mz_to_idx = {mz: i for i, mz in enumerate(stack.mz)}
         grid_idx  = np.array([mz_to_idx[mz] for mz in grid])
-        Y         = pressure[:, grid_idx]          # (n_times, n_grid)
+        Y         = pressure[:, grid_idx].astype(float)  # (n_times, n_grid)
         norms     = Y.max(axis=1, keepdims=True)
-        norms[norms == 0] = 1.0
+        norms[norms <= 0] = 1.0
         Y        /= norms
 
         n_times   = len(times)

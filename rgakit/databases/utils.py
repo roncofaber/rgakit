@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # Full column list matching local.py's _SELECT
 _FULL_SELECT = """
     SELECT s.id, s.inchikey, s.source,
-           c.smiles, c.exact_mass, c.cas,
+           c.smiles, c.exact_mass, c.cas, c.molecular_formula,
            s.mzs, s.intensities,
            s.precursor_mz, s.precursor_type,
            s.ionization_mode, s.ms_level,
