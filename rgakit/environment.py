@@ -35,6 +35,11 @@ ENVIRONMENT_SETS: dict[str, dict[str, object]] = {
         "smiles": ["C=CC", "CCC", "CC(C)C", "C=CCC", "CCCC", "CCCCCC"],
         "names":  ["Propene", "Propane", "Isobutane", "1-Butene", "Butane", "n-Hexane"],
     },
+    "beam_hydrocarbons": {
+        "label": "Beam-induced cracking products of adsorbed hydrocarbons",
+        "smiles": ["C#C"],
+        "names":  ["Acetylene"],
+    },
     "spin_solvent": {
         "label": "Spin-coating solvent",
         "smiles": ["CN(C)C=O"],
